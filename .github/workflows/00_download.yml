@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       info_hash:
-        description: "Torrent InfoHash Hex String"
+        description: "Torrent InfoHash Hex String atau 'AUTO'"
         required: true
         type: string
       imdb_id:
-        description: "Stremio IMDb identifier (cth: tt0186945 atau tt0903747:1:1)"
+        description: "IMDb identifier (cth: tt0111161)"
         required: true
         type: string
       file_idx:
@@ -17,9 +17,9 @@ on:
         default: "0"
         type: string
       title:
-        description: "Tajuk video atau nama pelepasan torrent"
+        description: "Tajuk video atau nama pelepasan"
         required: false
-        default: "Unknown Title"
+        default: "Video"
         type: string
 
 concurrency:
@@ -32,41 +32,39 @@ jobs:
     timeout-minutes: 350
 
     steps:
-      - name: 1. Peruntukan Ruang SSD Runner (Kosongkan ~25GB)
+      - name: 1. Nyahsekat DNS Runner (Guna Cloudflare 1.1.1.1 & Google 8.8.8.8)
         run: |
-          echo "Memadam perisian tidak diperlukan pada runner..."
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo sed -i '1inameserver 1.1.1.1\nnameserver 8.8.8.8' /etc/resolv.conf
+          head -n 4 /etc/resolv.conf
+
+      - name: 2. Peruntukan Ruang SSD Runner (Kosongkan ~25GB)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           sudo swapoff -a || true
           sudo rm -f /mnt/swapfile || true
           df -h
 
-      - name: 2. Checkout Repositori
-        uses: actions/checkout@v7
+      - name: 3. Checkout Repositori
+        uses: actions/checkout@v4
 
-      - name: 3. Pasang Persekitaran Python 3.11
-        uses: actions/setup-python@v7
+      - name: 4. Pasang Persekitaran Python 3.11
+        uses: actions/setup-python@v4
         with:
           python-version: "3.11"
           cache: "pip"
 
-      - name: 4. Pasang Perkakas aria2c & rclone
+      - name: 5. Pasang Perkakas aria2c & rclone
         run: |
           sudo apt-get update -y
           sudo apt-get install -y aria2 curl
-          # Pasang rclone versi stabil rasmi
-          sudo -v ; curl https://rclone.org/install.sh | sudo bash
-          aria2c --version | head -n 1
-          rclone --version | head -n 1
+          curl https://rclone.org/install.sh | sudo bash
 
-      - name: 5. Pasang Keperluan Pustaka Python
+      - name: 6. Pasang Keperluan Pustaka Python
         run: |
-          python -m pip install --upgrade pip
+          pip install --upgrade pip
           pip install -r requirements-runner.txt
 
-      - name: 6. Laksanakan Enjin 03_runner_core.py
+      - name: 7. Laksanakan Enjin Runner
         env:
           REDIS_ACCOUNTS_JSON: ${{ secrets.REDIS_ACCOUNTS_JSON }}
           B2_ACCOUNTS_JSON: ${{ secrets.B2_ACCOUNTS_JSON }}
