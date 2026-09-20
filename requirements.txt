@@ -11,7 +11,7 @@ uvicorn>=0.53.0
 aria2p>=0.12.1
 
 # Pustaka Sandaran Web Scraping & Resolusi Selamat
-curl-cffi>=0.7.0
+curl-cffi>=0.16.3
 beautifulsoup4>=4.15.0
 camoufox[geoip]>=0.5.0
 DrissionPage>=4.1.1.4
