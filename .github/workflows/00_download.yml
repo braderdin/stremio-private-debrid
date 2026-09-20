@@ -1,0 +1,79 @@
+name: Stremio Private Debrid Engine
+
+on:
+  workflow_dispatch:
+    inputs:
+      info_hash:
+        description: "Torrent InfoHash Hex String"
+        required: true
+        type: string
+      imdb_id:
+        description: "Stremio IMDb identifier (cth: tt0186945 atau tt0903747:1:1)"
+        required: true
+        type: string
+      file_idx:
+        description: "Indeks fail video di dalam torrent"
+        required: false
+        default: "0"
+        type: string
+      title:
+        description: "Tajuk video atau nama pelepasan torrent"
+        required: false
+        default: "Unknown Title"
+        type: string
+
+concurrency:
+  group: debrid-${{ inputs.info_hash }}
+  cancel-in-progress: false
+
+jobs:
+  download-and-cache:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: 1. Peruntukan Ruang SSD Runner (Kosongkan ~25GB)
+        run: |
+          echo "Memadam perisian tidak diperlukan pada runner..."
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo swapoff -a || true
+          sudo rm -f /mnt/swapfile || true
+          df -h
+
+      - name: 2. Checkout Repositori
+        uses: actions/checkout@v4
+
+      - name: 3. Pasang Persekitaran Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: 4. Pasang Perkakas aria2c & rclone
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y aria2 curl
+          # Pasang rclone versi stabil rasmi
+          sudo -v ; curl https://rclone.org/install.sh | sudo bash
+          aria2c --version | head -n 1
+          rclone --version | head -n 1
+
+      - name: 5. Pasang Keperluan Pustaka Python
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-runner.txt
+
+      - name: 6. Laksanakan Enjin 03_runner_core.py
+        env:
+          REDIS_ACCOUNTS_JSON: ${{ secrets.REDIS_ACCOUNTS_JSON }}
+          B2_ACCOUNTS_JSON: ${{ secrets.B2_ACCOUNTS_JSON }}
+          CF_WORKER_B2_PROXY_STORAGE: "https://b2-proxy-aria-engine.retrogamerg405v.workers.dev"
+        run: |
+          python live_engine/03_runner_core.py \
+            --hash "${{ inputs.info_hash }}" \
+            --imdb "${{ inputs.imdb_id }}" \
+            --idx "${{ inputs.file_idx }}" \
+            --title "${{ inputs.title }}"

@@ -1,0 +1,14 @@
+# Kunci Penting Tidak Boleh Masuk Ke Github
+.env.local
+.env.gh.example
+.env.gh.secret
+.env.example
+.dev.vars
+live_engine/local_run/key/
+trik-on-off.md
+archive/
+.archive/
+
+
+live_engine/archive/
+b2-account-seedr-projeck.env
