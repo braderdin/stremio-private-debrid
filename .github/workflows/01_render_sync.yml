@@ -18,7 +18,7 @@ jobs:
 
     steps:
       - name: 1. Semak Kod Repositori
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 2. Hantar Arahan Deploy ke Render API
         id: trigger_deploy

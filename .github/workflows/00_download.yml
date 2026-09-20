@@ -44,7 +44,7 @@ jobs:
           df -h
 
       - name: 2. Checkout Repositori
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 3. Pasang Persekitaran Python 3.11
         uses: actions/setup-python@v5
