@@ -14,7 +14,7 @@ jobs:
     if: github.actor == 'dependabot[bot]'
     steps:
       - name: 📥 Checkout Kod Sumber
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
@@ -68,7 +68,6 @@ jobs:
                           pkg_raw = m.group(1)
                           pkg_clean = re.sub(r'\[.*\]', '', pkg_raw).lower().replace('_', '-')
                           if pkg_clean in base_reqs:
-                              # Samakan versi mengikut requirements.txt
                               new_ver = base_reqs[pkg_clean]
                               updated_lines.append(f'{pkg_raw}{new_ver}')
                               continue
@@ -76,12 +75,12 @@ jobs:
               target_file.write_text('\n'.join(updated_lines) + '\n', encoding='utf-8')
           "
 
-          # Commit semula fail runner dan render jika berlaku penyelarasan versi
+          # Tag [skip ci] menghalang GitHub daripada mencetuskan workflow berulang yang tersekat
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add requirements-runner.txt requirements-render.txt
           if ! git diff --staged --quiet; then
-            git commit -m "chore: auto-sync package versions with requirements.txt"
+            git commit -m "chore: auto-sync package versions with requirements.txt [skip ci]"
             git push
           fi
 
@@ -99,15 +98,16 @@ jobs:
           fi
           echo "✅ Kesemua skrip melepasi pemeriksaan sintaks tanpa ralat."
 
-      - name: 🤖 Auto-Merge (Hanya Minor & Patch)
+      - name: 🤖 Auto-Merge Terus (Hanya Minor & Patch)
         if: steps.metadata.outputs.update-type != 'version-update:semver-major'
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "Kemas kini jenis Minor/Patch dikesan. Menggabungkan PR secara automatik..."
+          echo "Meluluskan dan menggabungkan PR secara terus tanpa menunggu..."
           gh pr review --approve "$PR_URL"
-          gh pr merge --squash --auto "$PR_URL"
+          # Menggabungkan terus (squash) dan memadam cawangan PR secara automatik
+          gh pr merge --squash --delete-branch "$PR_URL" || gh pr merge --squash --auto "$PR_URL"
 
       - name: ⚠️ Amaran Major Update (Perlu Semakan Manual)
         if: steps.metadata.outputs.update-type == 'version-update:semver-major'
