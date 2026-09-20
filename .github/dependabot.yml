@@ -5,7 +5,7 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 10
     # Kelompokkan pembaruan minor & patch ke dalam 1 PR terpadu
     groups:
       python-minor-patch:
@@ -20,7 +20,7 @@ updates:
     directory: "/"
     schedule:
       interval: "monthly"
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 5
     groups:
       actions-minor-patch:
         patterns:
