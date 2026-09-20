@@ -49,8 +49,8 @@ ENV = load_env_vars()
 ADDON_TOKEN = ENV.get("ADDON_SECRET_TOKEN", "Harunosakura1122")
 CF_WORKER_URL = ENV.get("CF_WORKER_URL", "https://stremio-real-debrid-addon.retrogamerg405v.workers.dev").rstrip("/")
 
-# Filem Ujian: The Shawshank Redemption (tt0111161)
-TEST_IMDB = "tt0111161"
+# Filem Ujian: The Shawshank Redemption (tt1204977)
+TEST_IMDB = "tt1204977"
 TEST_TYPE = "movie"
 
 
