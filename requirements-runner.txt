@@ -5,7 +5,7 @@ python-dotenv>=1.0.1
 pydantic>=2.10.0
 
 # Integrasi Kawalan aria2c di Runner
-aria2p>=0.12.0
+aria2p>=0.12.1
 
 # Pustaka Sandaran Pemprosesan & Rangkaian Pantas
 curl-cffi>=0.7.0
