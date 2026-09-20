@@ -2,10 +2,11 @@
 # ==============================================================================
 # PROJEK: STREMIO PRIVATE DEBRID - RUNNER CORE ENGINE (03_runner_core.py)
 # LOKASI: /home/braderdin/stremio-private-debrid/live_engine/03_runner_core.py
-# CIRI: SEAMLESS AUTO-RESOLVE + ARIA2C HIGH SPEED + B2 UPLOAD + REDIS CACHE
+# CIRI: SEAMLESS AUTO-RESOLVE + ARIA2C + B2 STORAGE UPLOADER + REDIS METADATA
 # ==============================================================================
 
 import os
+import re
 import sys
 import time
 import shutil
@@ -14,7 +15,7 @@ import argparse
 import subprocess
 import importlib
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 
 from rich.console import Console
 from rich.panel import Panel
@@ -49,7 +50,7 @@ PUBLIC_TRACKERS = [
 
 
 def build_magnet(info_hash: str, name: str) -> str:
-    """Membina pautan magnet dengan pelacak awam."""
+    """Membina pautan magnet dengan pelacak awam pantas."""
     tr = "&".join([f"tr={t}" for t in PUBLIC_TRACKERS])
     return f"magnet:?xt=urn:btih:{info_hash.lower()}&dn={name}&{tr}"
 
@@ -61,6 +62,25 @@ def calculate_sha256(filepath: Path) -> str:
         while chunk := f.read(4 * 1024 * 1024):
             sha.update(chunk)
     return sha.hexdigest()
+
+
+def sanitize_b2_path(imdb_id: str, original_filename: str) -> Tuple[str, str]:
+    """
+    Menukarkan semua ruang kosong dan simbol pelik menjadi titik '.'
+    supaya tiada ralat URL pada proxy dan pemain Stremio.
+    """
+    p = Path(original_filename)
+    ext = p.suffix.lower() if p.suffix else ".mp4"
+    stem = p.stem
+
+    # Bersihkan aksara: hanya abjad & nombor dibenarkan, yang lain jadi '.'
+    raw_combined = f"{imdb_id}.{stem}"
+    clean_stem = re.sub(r"[^a-zA-Z0-9]+", ".", raw_combined).strip(".")
+    clean_stem = re.sub(r"\.+", ".", clean_stem)
+
+    clean_filename = f"{clean_stem}{ext}"
+    b2_relative_path = f"media/{clean_filename}"
+    return clean_filename, b2_relative_path
 
 
 def run_aria2c(magnet: str, out_dir: Path, file_idx: int) -> Optional[Path]:
@@ -91,27 +111,10 @@ def run_aria2c(magnet: str, out_dir: Path, file_idx: int) -> Optional[Path]:
     return candidates[0]
 
 
-def upload_rclone(local_file: Path, b2_acc: Dict[str, Any], dest_path: str) -> bool:
-    """Memindahkan fail ke B2 menggunakan konfigurasi memori rclone."""
-    env = os.environ.copy()
-    r_name = "TEMP_B2_RUNNER"
-    env[f"RCLONE_CONFIG_{r_name}_TYPE"] = "b2"
-    env[f"RCLONE_CONFIG_{r_name}_ACCOUNT"] = b2_acc["key_id"]
-    env[f"RCLONE_CONFIG_{r_name}_KEY"] = b2_acc["app_key"]
-    env[f"RCLONE_CONFIG_{r_name}_ENDPOINT"] = b2_acc["endpoint"]
-
-    target = f"{r_name}:{b2_acc['bucket_name']}/{dest_path.lstrip('/')}"
-    cmd = ["rclone", "copyto", str(local_file), target, "--transfers=4", "--fast-list", "--stats=10s"]
-
-    console.print(f"[cyan]☁️ Memindahkan fail ke B2: #{b2_acc['index']} ({b2_acc['bucket_name']})...[/cyan]")
-    res = subprocess.run(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    return res.returncode == 0
-
-
 def execute_job(info_hash: str, imdb_id: str, file_idx: int, raw_title: str):
     console.print(Panel.fit(
         f"[bold cyan]⚡ DEBRID RUNNER ENGINE: MEMPROSES TUGAS[/bold cyan]\n"
-        f"IMDb: {imdb_id} | Hash Diterima: {info_hash}\nTajuk: {raw_title}",
+        f"IMDb: {imdb_id} | Hash: {info_hash}\nTajuk: {raw_title}",
         border_style="cyan"
     ))
 
@@ -127,13 +130,12 @@ def execute_job(info_hash: str, imdb_id: str, file_idx: int, raw_title: str):
             resolver = importlib.import_module("04_resolver")
             resolved = resolver.resolve_fallback(imdb_id, raw_title)
             if not resolved:
-                console.print("[bold red]❌ Gagal mendapatkan pautan torrent yang sah. Proses dihentikan.[/bold red]")
+                console.print("[bold red]❌ Gagal mendapatkan pautan torrent sah. Proses dihentikan.[/bold red]")
                 sys.exit(1)
 
             info_hash = resolved["info_hash"]
             raw_title = resolved["name"]
 
-            # Paparkan jadual pengesahan torrent yang dipilih
             table = Table(title="🎯 Torrent Terpilih untuk Muat Turun", border_style="green")
             table.add_column("Parameter", style="cyan")
             table.add_column("Maklumat", style="white")
@@ -148,7 +150,7 @@ def execute_job(info_hash: str, imdb_id: str, file_idx: int, raw_title: str):
             console.print(f"[bold red]❌ Ralat semasa memanggil 04_resolver: {e}[/bold red]")
             sys.exit(1)
 
-    # 3. Direktori Sementara & Pelaksanaan Muat Turun
+    # 3. Direktori Sementara & Pelaksanaan aria2c
     job_dir = TEMP_DIR / f"job_{info_hash[:10]}_{int(time.time())}"
     magnet_url = build_magnet(info_hash, raw_title)
 
@@ -167,17 +169,21 @@ def execute_job(info_hash: str, imdb_id: str, file_idx: int, raw_title: str):
             console.print("[bold red]❌ Storan B2 tidak mencukupi untuk menampung fail.[/bold red]")
             sys.exit(1)
 
-        clean_name = f"{imdb_id.replace(':', '_')}_{video_file.name}"
-        b2_path = f"media/{clean_name}"
-        if not upload_rclone(video_file, b2_target, b2_path):
-            console.print("[bold red]❌ Pemindahan ke B2 melalui rclone gagal.[/bold red]")
+        # 5. Penapisan Nama Fail Bebas Ralat Simbol / Space
+        clean_filename, b2_path = sanitize_b2_path(imdb_id, video_file.name)
+        console.print(f"[cyan]📁 Nama Destinasi B2 Diselaraskan:[/cyan] [bold white]{b2_path}[/bold white]")
+
+        # 6. Pemindahan ke B2 Melalui Storage Manager
+        upload_ok = storage.upload_file(video_file, b2_target, b2_path)
+        if not upload_ok:
+            console.print("[bold red]❌ Pemindahan ke B2 gagal. Proses dihentikan.[/bold red]")
             sys.exit(1)
 
-        # 5. Pendaftaran Metadata ke Upstash Redis
+        # 7. Pendaftaran Metadata ke Upstash Redis
         metadata = {
             "title": raw_title,
             "resolution": "1080p" if "1080" in raw_title else "HD",
-            "file_name": clean_name,
+            "file_name": clean_filename,
             "file_path": b2_path,
             "size_bytes": file_size,
             "b2_account_index": b2_target["index"],

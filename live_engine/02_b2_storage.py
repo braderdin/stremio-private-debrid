@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 # ==============================================================================
-# PROJEK: STREMIO PRIVATE DEBRID - PENGURUS STORAN B2 (20 AKAUN ROUND-ROBIN)
+# PROJEK: STREMIO PRIVATE DEBRID - PENGURUS STORAN B2 (02_b2_storage.py)
 # LOKASI: /home/braderdin/stremio-private-debrid/live_engine/02_b2_storage.py
+# CIRI: NATIVE B2 RCLONE ENGINE + ROUND-ROBIN 20 AKAUN + AUTOMATIK LRU EVICTION
 # ==============================================================================
 
+import os
 import time
+import subprocess
 import importlib
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
@@ -12,7 +15,6 @@ from typing import Dict, Any, Optional, List, Tuple
 import httpx
 from rich.console import Console
 from rich.panel import Panel
-from rich.table import Table
 
 console = Console()
 
@@ -39,7 +41,7 @@ class B2StorageManager:
         self.proxy_base = proxy_base.rstrip("/")
         self.auth_cache: Dict[int, Dict[str, Any]] = {}
         self.timeout = httpx.Timeout(15.0, connect=8.0)
-        self.current_rr_index = 0  # Penunjuk giliran Round-Robin 20 akaun
+        self.current_rr_index = 0
 
     def authorize_account(self, acc_index: int) -> Optional[Dict[str, Any]]:
         """Mendapatkan token sesi B2 dengan cache memori 12 jam."""
@@ -120,7 +122,6 @@ class B2StorageManager:
         clean_name = file_path.lstrip("/")
         try:
             with httpx.Client(timeout=self.timeout) as client:
-                # Cari file_id berdasarkan nama fail
                 list_resp = client.post(
                     f"{auth['api_url']}/b2api/v2/b2_list_file_names",
                     headers={"Authorization": auth["token"]},
@@ -134,7 +135,6 @@ class B2StorageManager:
                 if not target_file:
                     return False
 
-                # Hantar arahan padam versi fail
                 del_resp = client.post(
                     f"{auth['api_url']}/b2api/v2/b2_delete_file_version",
                     headers={"Authorization": auth["token"]},
@@ -145,15 +145,11 @@ class B2StorageManager:
             return False
 
     def select_round_robin_target(self, required_bytes: int = 1500000000) -> Optional[Dict[str, Any]]:
-        """
-        Memilih akaun B2 seterusnya secara Round-Robin yang mempunyai ruang selamat (< 9.5GB).
-        Penggiliran bergerak merentasi 20 akaun agar beban storan tidak tertumpu pada akaun tertentu.
-        """
+        """Memilih akaun B2 seterusnya secara Round-Robin yang mempunyai baki ruang selamat (< 9.5GB)."""
         total_accounts = len(self.accounts)
         if total_accounts == 0:
             return None
 
-        # Semak 20 akaun bermula dari kedudukan giliran semasa
         for _ in range(total_accounts):
             acc = self.accounts[self.current_rr_index]
             self.current_rr_index = (self.current_rr_index + 1) % total_accounts
@@ -165,17 +161,13 @@ class B2StorageManager:
         return None
 
     def allocate_storage_with_eviction(self, required_bytes: int, redis_db_instance: Any) -> Optional[Dict[str, Any]]:
-        """
-        Memastikan ruang storan sentiasa mencukupi merentasi 20 akaun.
-        Sekiranya tiada akaun yang dapat menampung fail, pelupusan fail paling lama (LRU) dijalankan secara automatik.
-        """
+        """Memastikan ruang mencukupi. Melakukan pelupusan LRU sekiranya semua 20 akaun penuh."""
         chosen_acc = self.select_round_robin_target(required_bytes)
         if chosen_acc:
             return chosen_acc
 
         console.print("[bold yellow]⚠️ Semua 20 akaun B2 penuh! Memulakan pembersihan fail lama (LRU)...[/bold yellow]")
 
-        # Ulangi proses padam fail lama sehingga ruang mencukupi
         for _ in range(15):
             oldest_meta = redis_db_instance.get_oldest_stream_across_shards()
             if not oldest_meta:
@@ -197,25 +189,38 @@ class B2StorageManager:
 
         return None
 
+    def upload_file(self, local_file: Path, b2_account: Dict[str, Any], dest_path: str) -> bool:
+        """Memindahkan fail ke B2 menggunakan Native Rclone tanpa konflik endpoint."""
+        env = os.environ.copy()
+        remote_name = "TEMP_B2_RUNNER"
+        clean_path = dest_path.lstrip("/")
+
+        # Konfigurasi B2 Native rasmi (tanpa parameter endpoint S3)
+        env[f"RCLONE_CONFIG_{remote_name}_TYPE"] = "b2"
+        env[f"RCLONE_CONFIG_{remote_name}_ACCOUNT"] = b2_account["key_id"]
+        env[f"RCLONE_CONFIG_{remote_name}_KEY"] = b2_account["app_key"]
+
+        target_remote = f"{remote_name}:{b2_account['bucket_name']}/{clean_path}"
+        cmd = [
+            "rclone", "copyto",
+            str(local_file),
+            target_remote,
+            "--transfers=4",
+            "--fast-list",
+            "--stats=10s",
+            "--stats-one-line"
+        ]
+
+        console.print(f"[cyan]☁️ Memindahkan fail ke B2: #{b2_account['index']} ({b2_account['bucket_name']})...[/cyan]")
+        res = subprocess.run(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+
+        if res.returncode != 0:
+            console.print(f"[bold red]❌ Rclone gagal memindahkan fail (Kod {res.returncode}):[/bold red]\n{res.stdout[-600:]}")
+            return False
+
+        console.print(f"[bold green]✅ Rclone berjaya memindahkan fail ke B2![/bold green]")
+        return True
+
 
 # Singleton Instance
 storage = B2StorageManager(B2_ACCOUNTS, CF_B2_PROXY)
-
-
-if __name__ == "__main__":
-    console.print(Panel.fit(
-        "[bold cyan]🧪 UJIAN SISTEM PENGURUS STORAN B2 (20 AKAUN ROUND-ROBIN)[/bold cyan]\n"
-        f"[yellow]Pangkalan URL Proksi:[/yellow] [white]{CF_B2_PROXY}[/white]\n"
-        "[white]Ciri: Round-Robin 20 Akaun, Pemadaman Automatik LRU, Semakan Had 9.5GB[/white]",
-        border_style="cyan"
-    ))
-
-    console.print("[cyan]Mencari sasaran simpanan untuk fail bersaiz 1.5 GB secara Round-Robin...[/cyan]")
-    allocated = storage.select_round_robin_target(int(1.5 * 1024 * 1024 * 1024))
-
-    if allocated:
-        proxy_preview = f"{CF_B2_PROXY}/{allocated['bucket_name']}/movies/sample_video.mp4"
-        console.print(f"[bold green]🎯 Akaun Terpilih : #{allocated['index']} ({allocated['bucket_name']})[/bold green]")
-        console.print(f"[bold cyan]🔗 Contoh URL B2 : {proxy_preview}[/bold cyan]")
-    else:
-        console.print("[bold red]⚠️ Perlu pelupusan ruang (tiada akaun mempunyai baki 1.5 GB).[/bold red]")
