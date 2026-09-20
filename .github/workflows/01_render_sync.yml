@@ -1,4 +1,4 @@
-name: Auto Deploy & Sync to Render
+name: 01 Auto Deploy & Sync to Render
 
 on:
   push:

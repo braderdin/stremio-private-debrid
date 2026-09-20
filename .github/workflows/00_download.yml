@@ -1,4 +1,4 @@
-name: Stremio Private Debrid Engine
+name: 00 Stremio Private Debrid Engine
 
 on:
   workflow_dispatch:
