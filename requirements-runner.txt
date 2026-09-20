@@ -2,7 +2,7 @@
 httpx>=0.28.1
 rich>=13.9.4
 python-dotenv>=1.0.1
-pydantic>=2.10.0
+pydantic>=2.13.5
 
 # Integrasi Kawalan aria2c di Runner
 aria2p>=0.12.0
