@@ -1,6 +1,6 @@
 # Enjin Asas & API Pelayan Tempatan
 httpx>=0.28.1
-rich>=13.9.4
+rich>=15.0.0
 python-dotenv>=1.2.3
 pydantic>=2.13.5
 pydantic-settings>=2.5.0
