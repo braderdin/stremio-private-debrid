@@ -4,7 +4,7 @@ rich>=13.9.4
 python-dotenv>=1.2.3
 pydantic>=2.13.5
 pydantic-settings>=2.5.0
-fastapi>=0.115.0
+fastapi>=0.141.1
 uvicorn>=0.53.0
 
 # Perkakas Pengendali & Kawalan aria2c Python
