@@ -9,5 +9,7 @@ aria2p>=0.12.1
 
 # Pustaka Sandaran Pemprosesan & Rangkaian Pantas
 curl-cffi>=0.16.3
+camoufox[geoip]>=0.5.6
+DrissionPage>=4.1.1.4
 beautifulsoup4>=4.15.0
 tenacity>=9.1.4

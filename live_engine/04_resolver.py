@@ -2,20 +2,21 @@
 # ==============================================================================
 # PROJEK: STREMIO PRIVATE DEBRID - MODUL MODULAR SMART RESOLVER (04_resolver.py)
 # LOKASI: /home/braderdin/stremio-private-debrid/live_engine/04_resolver.py
-# CIRI: MULTI-STAGE APIBAY (IMDB -> TAJUK+TAHUN -> TAJUK BERSIH) + YTS FALLBACK
+# CIRI: CURL-CFFI TLS IMPERSONATION (BYPASS CLOUDFLARE 403) + MULTI-STAGE APIBAY
 # ==============================================================================
 
 import re
+import sys
 from typing import Dict, Any, Optional, List
-import httpx
+
+from curl_cffi import requests
 from rich.console import Console
-from rich.table import Table
 
 console = Console()
 
 
 def detect_quality(name: str) -> str:
-    """Mengesan kualiti pelepasan video."""
+    """Mengesan kualiti pelepasan video daripada rentetan nama fail."""
     n = name.lower()
     if any(q in n for q in ["2160p", "4k", "uhd"]):
         return "4K"
@@ -68,68 +69,100 @@ def filter_and_rank_torrents(items: List[Dict[str, Any]], source_label: str) -> 
 
 
 def query_apibay(query_param: str, label: str) -> Optional[Dict[str, Any]]:
-    """Menghubungi apibay.org dengan pengesanan ralat terperinci."""
+    """
+    Menghubungi apibay.org menggunakan curl_cffi TLS impersonation
+    untuk memintas sekatan Cloudflare Bot Management (HTTP 403).
+    """
     url = f"https://apibay.org/q.php?q={query_param}"
     console.print(f"[cyan]📡 [{label}] Menghubungi apibay.org?q={query_param}...[/cyan]")
-    try:
-        with httpx.Client(timeout=10.0, headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64)"}) as client:
-            resp = client.get(url)
-            if resp.status_code != 200:
-                console.print(f"[yellow]⚠️ [{label}] Respons HTTP Tidak Normal: Kod {resp.status_code}[/yellow]")
-                return None
 
-            data = resp.json()
-            if isinstance(data, list) and len(data) > 0 and data[0].get("name") != "No results returned":
-                console.print(f"[green]✅ [{label}] Menemui {len(data)} entri kasar di Apibay.[/green]")
-                return filter_and_rank_torrents(data, label)
-            else:
-                console.print(f"[dim]ℹ️ [{label}] Tiada entri sepadan dipulangkan oleh Apibay.[/dim]")
-    except Exception as e:
-        console.print(f"[bold red]❌ [{label}] Ralat Rangkaian Apibay: {type(e).__name__} - {e}[/bold red]")
-    return None
+    # Penyamaran cap jari penyulitan pelayar sebenar secara bergilir
+    browser_profiles = ["chrome120", "chrome110", "safari15_5"]
 
+    for profile in browser_profiles:
+        try:
+            resp = requests.get(
+                url,
+                impersonate=profile,
+                timeout=12,
+                headers={
+                    "Accept": "application/json, text/plain, */*",
+                    "Accept-Language": "en-US,en;q=0.9",
+                    "Referer": "https://thepiratebay.org/",
+                    "Sec-Ch-Ua": '"Not A(Brand";v="99", "Google Chrome";v="120", "Chromium";v="120"',
+                    "Sec-Ch-Ua-Mobile": "?0",
+                    "Sec-Ch-Ua-Platform": '"Windows"',
+                }
+            )
 
-def query_yts_fallback(imdb_id: str) -> Optional[Dict[str, Any]]:
-    """Sandaran YTS API sekiranya pelayan Apibay mengalami masalah."""
-    base_id = imdb_id.split(":")[0]
-    url = f"https://yts.mx/api/v2/list_movies.json?query_term={base_id}"
-    console.print(f"[cyan]📡 [YTS API] Mencuba sandaran ke yts.mx untuk {base_id}...[/cyan]")
-    try:
-        with httpx.Client(timeout=8.0, headers={"User-Agent": "Mozilla/5.0"}) as client:
-            resp = client.get(url)
             if resp.status_code == 200:
-                movies = resp.json().get("data", {}).get("movies", [])
-                if movies and movies[0].get("torrents"):
-                    m = movies[0]
-                    torrents = m["torrents"]
-                    t = next((x for x in torrents if "1080p" in x.get("quality", "").lower()), torrents[0])
-                    sz = int(t.get("size_bytes", 0))
-                    return {
-                        "name": f"{m.get('title')} ({m.get('year')}) [{t.get('quality', 'HD')}] [YTS]",
-                        "info_hash": t["hash"].lower(),
-                        "seeders": int(t.get("seeds", 10)),
-                        "size": sz,
-                        "quality": t.get("quality", "1080p"),
-                        "source": "YTS Official API"
-                    }
-    except Exception as e:
-        console.print(f"[dim]ℹ️ [YTS API] Dikecualikan: {type(e).__name__} (lazim pada sekatan DNS Azure)[/dim]")
+                try:
+                    data = resp.json()
+                    if isinstance(data, list) and len(data) > 0 and data[0].get("name") != "No results returned":
+                        console.print(f"[green]✅ [{label}] Bypass Cloudflare berjaya ({profile})! {len(data)} entri diterima.[/green]")
+                        return filter_and_rank_torrents(data, label)
+                    else:
+                        console.print(f"[dim]ℹ️ [{label}] Apibay memulangkan senarai kosong.[/dim]")
+                        return None
+                except Exception as je:
+                    console.print(f"[yellow]⚠️ [{label}] Ralat huraian JSON: {je}[/yellow]")
+                    return None
+
+            elif resp.status_code == 403:
+                console.print(f"[yellow]⚠️ [{label}] HTTP 403 dikesan dengan {profile}, mencuba profil lain...[/yellow]")
+                continue
+            else:
+                console.print(f"[yellow]⚠️ [{label}] Status HTTP luar jangkaan: {resp.status_code}[/yellow]")
+
+        except Exception as e:
+            console.print(f"[dim]⚠️ [{label}] Ralat rangkaian ({profile}): {type(e).__name__} - {e}[/dim]")
+
     return None
 
 
 def get_cinemeta_meta(imdb_id: str) -> tuple[str, str]:
-    """Mengekstrak tajuk dan tahun rasmi daripada Cinemeta."""
+    """Mengekstrak tajuk dan tahun rasmi daripada Cinemeta menggunakan curl-cffi."""
     base_id = imdb_id.split(":")[0]
-    try:
-        url = f"https://v3-cinemeta.strem.io/meta/movie/{base_id}.json"
-        with httpx.Client(timeout=6.0) as client:
-            r = client.get(url)
-            if r.status_code == 200:
-                meta = r.json().get("meta", {})
-                return meta.get("name", ""), str(meta.get("year", ""))
-    except Exception:
-        pass
+    for mtype in ["movie", "series"]:
+        url = f"https://v3-cinemeta.strem.io/meta/{mtype}/{base_id}.json"
+        try:
+            res = requests.get(url, impersonate="chrome120", timeout=8)
+            if res.status_code == 200:
+                meta = res.json().get("meta", {})
+                name = meta.get("name", "")
+                year = str(meta.get("year", "")).split("–")[0].split("-")[0].strip()
+                if name:
+                    return name, year
+        except Exception:
+            continue
     return "", ""
+
+
+def query_yts_fallback(imdb_id: str) -> Optional[Dict[str, Any]]:
+    """Sandaran YTS API menggunakan curl-cffi."""
+    base_id = imdb_id.split(":")[0]
+    url = f"https://yts.mx/api/v2/list_movies.json?query_term={base_id}"
+    console.print(f"[cyan]📡 [YTS API] Mencuba sandaran ke yts.mx untuk {base_id}...[/cyan]")
+    try:
+        resp = requests.get(url, impersonate="chrome120", timeout=8)
+        if resp.status_code == 200:
+            movies = resp.json().get("data", {}).get("movies", [])
+            if movies and movies[0].get("torrents"):
+                m = movies[0]
+                torrents = m["torrents"]
+                t = next((x for x in torrents if "1080p" in x.get("quality", "").lower()), torrents[0])
+                sz = int(t.get("size_bytes", 0))
+                return {
+                    "name": f"{m.get('title')} ({m.get('year')}) [{t.get('quality', 'HD')}] [YTS]",
+                    "info_hash": t["hash"].lower(),
+                    "seeders": int(t.get("seeds", 10)),
+                    "size": sz,
+                    "quality": t.get("quality", "1080p"),
+                    "source": "YTS Official API"
+                }
+    except Exception as e:
+        console.print(f"[dim]ℹ️ [YTS API] Dikecualikan: {type(e).__name__}[/dim]")
+    return None
 
 
 def resolve_fallback(imdb_id: str, default_title: str) -> Optional[Dict[str, Any]]:
@@ -137,24 +170,24 @@ def resolve_fallback(imdb_id: str, default_title: str) -> Optional[Dict[str, Any
     console.print(f"\n[bold cyan]🧠 ENJIN PINTAR: MEMULAKAN PROSES RESOLVE BAGI {imdb_id}[/bold cyan]")
     base_id = imdb_id.split(":")[0]
 
-    # PERINGKAT 1: Carian Terus Menggunakan ID IMDb di Apibay (Paling Tepat & Berkesan)
+    # PERINGKAT 1: Carian Terus ID IMDb di Apibay (Paling Tepat & Berkesan)
     res = query_apibay(base_id, "Peringkat 1: Apibay ID")
     if res:
         return res
 
-    # Dapatkan maklumat metadata filem
+    # Ekstrak Metadata daripada Cinemeta
     meta_title, meta_year = get_cinemeta_meta(imdb_id)
     clean_title = meta_title or default_title
     clean_title = re.sub(r"[^\w\s]", " ", clean_title).strip()
 
-    # PERINGKAT 2: Carian Apibay Menggunakan Tajuk + Tahun
+    # PERINGKAT 2: Carian Apibay Tajuk + Tahun
     if clean_title and meta_year:
         search_query_1 = f"{clean_title} {meta_year}"
         res = query_apibay(search_query_1, "Peringkat 2: Apibay Tajuk+Tahun")
         if res:
             return res
 
-    # PERINGKAT 3: Carian Apibay Menggunakan Tajuk Sahaja
+    # PERINGKAT 3: Carian Apibay Tajuk Sahaja
     if clean_title:
         res = query_apibay(clean_title, "Peringkat 3: Apibay Tajuk Sahaja")
         if res:
