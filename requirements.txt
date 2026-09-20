@@ -8,7 +8,7 @@ fastapi>=0.115.0
 uvicorn>=0.53.0
 
 # Perkakas Pengendali & Kawalan aria2c Python
-aria2p>=0.12.0
+aria2p>=0.12.1
 
 # Pustaka Sandaran Web Scraping & Resolusi Selamat
 curl-cffi>=0.7.0
