@@ -1,0 +1,75 @@
+name: Auto Deploy & Sync to Render
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "live_engine/04_render_server.py"
+      - "live_engine/00_config.py"
+      - "requirements-render.txt"
+      - ".github/workflows/01_render_sync.yml"
+
+jobs:
+  deploy-render:
+    name: Trigger Render Service Deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 1. Semak Kod Repositori
+        uses: actions/checkout@v4
+
+      - name: 2. Hantar Arahan Deploy ke Render API
+        id: trigger_deploy
+        run: |
+          echo "Menghantar arahan deploy baharu ke Render..."
+          
+          # Hantar panggilan REST API ke Render
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "https://api.render.com/v1/services/${{ secrets.RENDER_SERVICE_ID }}/deploys" \
+            -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}" \
+            -H "Accept: application/json" \
+            -H "Content-Type: application/json" \
+            -d '{"clearCache": "do_not_clear"}')
+
+          HTTP_STATUS=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          echo "HTTP Status: $HTTP_STATUS"
+          echo "Response: $BODY"
+
+          if [ "$HTTP_STATUS" -ne 200 ] && [ "$HTTP_STATUS" -ne 201 ]; then
+            echo "❌ Ralat: Gagal memicu deploy Render!"
+            exit 1
+          fi
+
+          DEPLOY_ID=$(echo "$BODY" | grep -o '"id":"[^"]*' | head -n1 | cut -d'"' -f4)
+          echo "DEPLOY_ID=$DEPLOY_ID" >> $GITHUB_ENV
+          echo "✅ Deploy berjaya dipicu dengan ID: $DEPLOY_ID"
+
+      - name: 3. Pantau Status Deployment sehingga LIVE
+        run: |
+          echo "Menunggu perkhidmatan Render siap dikemas kini..."
+          
+          for i in {1..30}; do
+            STATUS_RESP=$(curl -s -X GET \
+              "https://api.render.com/v1/services/${{ secrets.RENDER_SERVICE_ID }}/deploys?limit=1" \
+              -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}" \
+              -H "Accept: application/json")
+
+            CURRENT_STATUS=$(echo "$STATUS_RESP" | grep -o '"status":"[^"]*' | head -n1 | cut -d'"' -f4)
+            echo "Status semasa (#$i): $CURRENT_STATUS"
+
+            if [ "$CURRENT_STATUS" = "live" ]; then
+              echo "🎉 Perkhidmatan Render telah LIVE dan beroperasi secara normal!"
+              exit 0
+            elif [ "$CURRENT_STATUS" = "build_failed" ] || [ "$CURRENT_STATUS" = "deactivated" ]; then
+              echo "❌ Deploy gagal pada pelayan Render!"
+              exit 1
+            fi
+
+            sleep 10
+          done
+
+          echo "⚠️ Amaran: Deploy mengambil masa melebihi jangkaan, periksa log papan pemuka Render."

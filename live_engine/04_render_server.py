@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # ==============================================================================
-# PROJEK: STREMIO PRIVATE DEBRID - PELAYAN MIKRO RENDER (24/7 LIGHTWEIGHT DISPATCHER)
+# PROJEK: STREMIO PRIVATE DEBRID - PELAYAN MIKRO RENDER (RESOLVER & DISPATCHER)
 # LOKASI: /home/braderdin/stremio-private-debrid/live_engine/04_render_server.py
 # ==============================================================================
 
@@ -9,19 +9,19 @@ import sys
 import time
 import json
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-# 1. Pastikan Laluan Folder Dimasukkan ke sys.path
+# 1. Pastikan Laluan Direktori Dimasukkan ke sys.path
 CURRENT_DIR = Path(__file__).resolve().parent
 if str(CURRENT_DIR) not in sys.path:
     sys.path.insert(0, str(CURRENT_DIR))
 
-# 2. Baca Pembolehubah Persekitaran Utama (Render & GitHub Actions)
+# 2. Pembolehubah Persekitaran Utama (Render & GitHub Actions)
 ADDON_SECRET_TOKEN = os.getenv("ADDON_SECRET_TOKEN", "Harunosakura1122")
 GH_PAT = os.getenv("GH_PAT", "")
 GH_OWNER = os.getenv("GH_OWNER", "braderdin")
@@ -40,9 +40,9 @@ class DispatchRequest(BaseModel):
 
 # 4. Inisialisasi Aplikasi FastAPI
 app = FastAPI(
-    title="Stremio Private Debrid Dispatcher",
-    description="Pelayan mikro ringan 24/7 untuk keepalive ping & pencetus alur kerja GitHub",
-    version="1.0.0"
+    title="Stremio Private Debrid Dispatcher & Resolver",
+    description="Pelayan mikro ringan 24/7 untuk keepalive ping, stream resolver & GitHub Actions dispatcher",
+    version="1.1.0"
 )
 
 SERVER_START_TIME = time.time()
@@ -68,7 +68,7 @@ async def trigger_github_workflow(info_hash: str, imdb_id: str, file_idx: str, t
     headers = {
         "Authorization": f"Bearer {GH_PAT}",
         "Accept": "application/vnd.github+json",
-        "User-Agent": "Render-Debrid-Dispatcher/1.0"
+        "User-Agent": "Render-Debrid-Dispatcher/1.1"
     }
     payload = {
         "ref": "main",
@@ -91,8 +91,8 @@ async def trigger_github_workflow(info_hash: str, imdb_id: str, file_idx: str, t
 @app.get("/", tags=["Keepalive"])
 async def root_ping():
     """
-    Endpoint utama untuk menerima Keepalive Ping dari Cloudflare Worker setiap 10 minit.
-    Menghalang pelayan percuma Render daripada masuk mod tidur (sleep).
+    Endpoint utama menerima Keepalive Ping dari Cloudflare Worker setiap 10 minit.
+    Menghalang pelayan Render Free Tier daripada masuk ke mod tidur (sleep).
     """
     uptime_seconds = int(time.time() - SERVER_START_TIME)
     uptime_str = f"{uptime_seconds // 3600}j {(uptime_seconds % 3600) // 60}m {uptime_seconds % 60}s"
@@ -108,8 +108,32 @@ async def root_ping():
 
 @app.get("/health", tags=["Keepalive"])
 async def health_check():
-    """Endpoint pemantauan kesihatan bagi perkhidmatan uptime pihak ketiga."""
+    """Endpoint pemantauan kesihatan uptime perkhidmatan."""
     return {"status": "healthy", "timestamp": int(time.time())}
+
+
+@app.get("/api/resolve-streams", tags=["Resolver"])
+async def resolve_streams(type: str = Query("movie"), id: str = Query(...)):
+    """
+    Menyelesaikan senarai torrent daripada Torrentio tanpa sekatan Cloudflare WAF.
+    Panggilan dibuat terus dari pusat data Render di Singapura.
+    """
+    clean_id = id.replace(".json", "").strip()
+    target_url = f"https://torrentio.strem.fun/stream/{type}/{clean_id}.json"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        "Accept": "application/json"
+    }
+
+    async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as client:
+        try:
+            resp = await client.get(target_url, headers=headers)
+            if resp.status_code == 200:
+                data = resp.json()
+                return {"success": True, "streams": data.get("streams", [])}
+            return {"success": False, "streams": [], "status_code": resp.status_code}
+        except Exception as e:
+            return {"success": False, "streams": [], "error": str(e)}
 
 
 @app.post("/api/dispatch", tags=["Dispatcher"])
@@ -118,8 +142,7 @@ async def handle_dispatch(
     x_addon_token: Optional[str] = Header(None, alias="X-Addon-Token")
 ):
     """
-    Endpoint webhook untuk memicu muat turun GitHub Actions secara luaran.
-    Boleh dipanggil oleh bot sampingan atau Cloudflare Worker.
+    Endpoint webhook untuk memicu alur kerja GitHub Actions secara luaran.
     """
     auth_candidate = body.secret_token or x_addon_token
     if auth_candidate != ADDON_SECRET_TOKEN:
@@ -165,13 +188,12 @@ async def handle_dispatch(
 @app.get("/api/check-cache", tags=["Metadata"])
 async def check_cache(imdb_id: str = Query(..., description="Stremio IMDb ID")):
     """
-    Menyemak status ketersediaan video di pangkalan data Upstash Redis tanpa membebankan RAM Render.
+    Menyemak status ketersediaan video di pangkalan data Upstash Redis.
     """
     shards = get_redis_shards()
     if not shards:
         return {"status": "unconfigured", "message": "Konfigurasi REDIS_ACCOUNTS_JSON tiada pada Render."}
 
-    # Kira shard sasaran menggunakan formula ringkas
     match_num = "".join(filter(str.isdigit, imdb_id))
     shard_idx = int(match_num) % len(shards) if match_num else 0
     target_shard = shards[shard_idx]
