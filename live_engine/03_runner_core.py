@@ -88,7 +88,7 @@ def run_aria2c(magnet: str, out_dir: Path, file_idx: int) -> Optional[Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     cmd = [
         "aria2c", "--seed-time=0", "--summary-interval=5", "--max-connection-per-server=16",
-        "--split=16", "--min-split-size=1M", "--file-allocation=none", "--bt-stop-timeout=600",
+        "--split=16", "--min-split-size=1M", "--file-allocation=none", "--bt-stop-timeout=2400",
         f"--dir={str(out_dir)}"
     ]
     if file_idx > 0:
