@@ -13,7 +13,7 @@ aria2p>=0.12.1
 # Pustaka Sandaran Web Scraping & Resolusi Selamat
 curl-cffi>=0.16.3
 beautifulsoup4>=4.15.0
-camoufox[geoip]>=0.5.0
+camoufox[geoip]>=0.5.6
 DrissionPage>=4.1.1.4
 pandas>=3.0.5
 tenacity>=9.1.4
