@@ -1,7 +1,7 @@
 # Enjin Teras Runner (Muat Turun, B2 & Redis)
 httpx>=0.28.1
 rich>=13.9.4
-python-dotenv>=1.0.1
+python-dotenv>=1.2.3
 pydantic>=2.13.5
 
 # Integrasi Kawalan aria2c di Runner
