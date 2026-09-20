@@ -25,51 +25,57 @@ jobs:
         run: |
           echo "Menghantar arahan deploy baharu ke Render..."
           
-          # Hantar panggilan REST API ke Render
-          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+          # Hantar panggilan POST ke Render REST API (tangkap HTTP status code di baris akhir)
+          RESPONSE=$(curl -sS -w "\n%{http_code}" -X POST \
             "https://api.render.com/v1/services/${{ secrets.RENDER_SERVICE_ID }}/deploys" \
             -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}" \
             -H "Accept: application/json" \
             -H "Content-Type: application/json" \
             -d '{"clearCache": "do_not_clear"}')
 
-          HTTP_STATUS=$(echo "$RESPONSE" | tail -n1)
+          HTTP_STATUS=$(echo "$RESPONSE" | tail -n1 | tr -d '\r')
           BODY=$(echo "$RESPONSE" | sed '$d')
 
           echo "HTTP Status: $HTTP_STATUS"
           echo "Response: $BODY"
 
-          if [ "$HTTP_STATUS" -ne 200 ] && [ "$HTTP_STATUS" -ne 201 ]; then
-            echo "❌ Ralat: Gagal memicu deploy Render!"
+          # Render memulangkan HTTP 201 (Created) atau 202 (Accepted)
+          if [ "$HTTP_STATUS" -lt 200 ] || [ "$HTTP_STATUS" -ge 300 ]; then
+            echo "❌ Ralat: Gagal memicu deploy Render (HTTP $HTTP_STATUS)!"
             exit 1
           fi
 
-          DEPLOY_ID=$(echo "$BODY" | grep -o '"id":"[^"]*' | head -n1 | cut -d'"' -f4)
-          echo "DEPLOY_ID=$DEPLOY_ID" >> $GITHUB_ENV
-          echo "✅ Deploy berjaya dipicu dengan ID: $DEPLOY_ID"
+          DEPLOY_ID=$(echo "$BODY" | grep -o '"id":"[^"]*' | head -n1 | cut -d'"' -f4 || echo "")
+          if [ -n "$DEPLOY_ID" ]; then
+            echo "DEPLOY_ID=$DEPLOY_ID" >> $GITHUB_ENV
+            echo "✅ Deploy berjaya dipicu dengan ID: $DEPLOY_ID"
+          else
+            echo "✅ Arahan deploy berjaya diterima oleh Render (Status: $HTTP_STATUS)."
+          fi
 
       - name: 3. Pantau Status Deployment sehingga LIVE
         run: |
           echo "Menunggu perkhidmatan Render siap dikemas kini..."
           
           for i in {1..30}; do
-            STATUS_RESP=$(curl -s -X GET \
+            STATUS_RESP=$(curl -sS -X GET \
               "https://api.render.com/v1/services/${{ secrets.RENDER_SERVICE_ID }}/deploys?limit=1" \
               -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}" \
               -H "Accept: application/json")
 
-            CURRENT_STATUS=$(echo "$STATUS_RESP" | grep -o '"status":"[^"]*' | head -n1 | cut -d'"' -f4)
+            RAW_STATUS=$(echo "$STATUS_RESP" | grep -o '"status":"[^"]*' | head -n1 | cut -d'"' -f4 || echo "unknown")
+            CURRENT_STATUS=$(echo "$RAW_STATUS" | tr '[:upper:]' '[:lower:]')
             echo "Status semasa (#$i): $CURRENT_STATUS"
 
             if [ "$CURRENT_STATUS" = "live" ]; then
               echo "🎉 Perkhidmatan Render telah LIVE dan beroperasi secara normal!"
               exit 0
-            elif [ "$CURRENT_STATUS" = "build_failed" ] || [ "$CURRENT_STATUS" = "deactivated" ]; then
-              echo "❌ Deploy gagal pada pelayan Render!"
+            elif [ "$CURRENT_STATUS" = "build_failed" ] || [ "$CURRENT_STATUS" = "deactivated" ] || [ "$CURRENT_STATUS" = "canceled" ]; then
+              echo "❌ Deploy gagal pada pelayan Render dengan status: $CURRENT_STATUS!"
               exit 1
             fi
 
             sleep 10
           done
 
-          echo "⚠️ Amaran: Deploy mengambil masa melebihi jangkaan, periksa log papan pemuka Render."
+          echo "⚠️ Amaran: Deploy mengambil masa melebihi 5 minit, periksa log papan pemuka Render."
