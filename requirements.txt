@@ -14,6 +14,6 @@ aria2p>=0.12.0
 curl-cffi>=0.7.0
 beautifulsoup4>=4.12.0
 camoufox[geoip]>=0.5.0
-DrissionPage>=4.1.0
+DrissionPage>=4.1.1.4
 pandas>=2.2.0
 tenacity>=9.0.0
