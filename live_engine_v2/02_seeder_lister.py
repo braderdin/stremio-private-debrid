@@ -105,7 +105,7 @@ def process_and_save_seeder_list(imdb_id: str, fallback_title: str = "") -> bool
 
     valid_list = []
     MIN_BYTES = 400 * 1024 * 1024       # 400 MB
-    MAX_BYTES = 15.0 * 1024 * 1024 * 1024  # 15 GB
+    MAX_BYTES = 8.5 * 1024 * 1024 * 1024  # 8.5 GB (maksimum selamat untuk B2)
 
     for item in raw_results:
         h = (item.get("info_hash") or "").strip().lower()
@@ -139,8 +139,8 @@ def process_and_save_seeder_list(imdb_id: str, fallback_title: str = "") -> bool
     valid_list.sort(key=lambda x: x["seeders"], reverse=True)
     top_torrents = valid_list[:35]
 
-    # Simpan ke Redis V2
-    saved = db_v2.save_torrent_list(base_id, top_torrents, ttl_seconds=7200)
+    # Simpan ke Redis V2 (TTL: 24 Jam)
+    saved = db_v2.save_torrent_list(base_id, top_torrents, ttl_seconds=86400)
 
     if saved:
         table = Table(title=f"📋 Senarai Seeder Teratas bagi {base_id} ({len(top_torrents)} pilihan)", border_style="green")
@@ -150,7 +150,7 @@ def process_and_save_seeder_list(imdb_id: str, fallback_title: str = "") -> bool
         table.add_column("Seeders", style="green")
         table.add_column("Tajuk Torrent", style="dim")
 
-        for idx, t in enumerate(top_torrents[:8], 1):
+        for idx, t in enumerate(top_torrents[:35], 1):
             sz_str = f"{t['size'] / (1024*1024*1024):.2f} GB" if t['size'] >= 1024**3 else f"{t['size'] / (1024*1024):.1f} MB"
             table.add_row(str(idx), t["quality"], sz_str, str(t["seeders"]), t["name"][:50])
 
