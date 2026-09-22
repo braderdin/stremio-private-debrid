@@ -6,7 +6,8 @@
  * 1. Sokongan Penuh Multi-Stream: Papar semua kualiti sedia tonton di B2.
  * 2. Penapisan Hash Pintar: Halang torrent sedia ada muncul semula di butang sedut.
  * 3. Kunci Penyejuk Atomik Redis 2 Minit (120s) untuk menyekat pemicu berganda TV.
- * 4. Butang Kemas Kini Senarai (Refresh) sentiasa tersedia di bawah sekali.
+ * 4. Pengecaman Sumber Pintar: Papar label ⚙️ Torrentio atau 🏴‍☠️ Apibay di kad TV.
+ * 5. Butang Kemas Kini Senarai (Refresh) sentiasa tersedia di bawah sekali.
  * ==============================================================================
  */
 
@@ -66,7 +67,7 @@ export default {
     if (route === "manifest.json" || pathParts.length === 1) {
       const manifest = {
         id: "org.braderdin.privatedebrid.v2",
-        version: "2.2.0",
+        version: "2.2.1",
         name: "B2 Debrid V2 (Smart Picker)",
         description: "Pilih Kualiti & Seeder Terbanyak Sebelum Muat Turun ke B2",
         resources: ["stream"],
@@ -177,11 +178,16 @@ export default {
             const seeds = item.seeders || 0;
             const q = item.quality || "HD";
 
+            // Padanan label punca berasaskan data 02_seeder_lister.py
+            const sourceTag = item.source === "Torrentio" 
+              ? "⚙️ Torrentio" 
+              : (item.source === "Apibay" ? "🏴‍☠️ Apibay" : `🌐 ${item.source || 'Web'}`);
+
             const downloadUrl = `${workerBase}/${requestToken}/trigger_download?hash=${item.info_hash}&id=${rawId}&title=${encodeURIComponent(cleanTitle)}`;
 
             streamResults.push({
               name: `[📥 Sedut B2] ${q}`,
-              title: `${item.name}\n💾 ${sizeText}  |  👤 ${seeds} Seeders  |  ⚡ Klik untuk Muat Turun`,
+              title: `${item.name}\n💾 ${sizeText}  |  👤 ${seeds} Seeds  |  ${sourceTag}\n⚡ Klik untuk Muat Turun`,
               url: downloadUrl,
               behaviorHints: { bingeGroup: `b2-v2-choice-${rawId}`, notWebReady: false }
             });

@@ -1,0 +1,71 @@
+name: X03 Series Seeder List Engine
+
+on:
+  workflow_dispatch:
+    inputs:
+      imdb_id:
+        description: "Target IMDb ID (cth: tt0944947:1:1 atau tt0078748)"
+        required: true
+        type: string
+      title:
+        description: "Tajuk sandaran siri/filem"
+        required: false
+        default: ""
+        type: string
+
+concurrency:
+  group: seeder-list-${{ inputs.imdb_id }}
+  cancel-in-progress: true
+
+jobs:
+  scrape-and-cache-series-list:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: 1. Checkout Repositori
+        uses: actions/checkout@v4
+
+      - name: 2. Pasang Persekitaran Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: 3. Pasang Keperluan Pustaka Python
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements-runner.txt
+          pip install guessit
+
+      - name: 4. Laksanakan Enjin X03_series_seeder_lister.py
+        env:
+          REDIS_ACCOUNTS_JSON: ${{ secrets.REDIS_ACCOUNTS_JSON }}
+        run: |
+          python live_engine_v3/X03_series_seeder_lister.py \
+            --imdb "${{ inputs.imdb_id }}" \
+            --title "${{ inputs.title }}"
+
+      - name: 5. Hantar Notifikasi Senarai Seeder ke Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          REDIS_ACCOUNTS_JSON: ${{ secrets.REDIS_ACCOUNTS_JSON }}
+        run: |
+          python live_engine_v2/03_telegram_notify.py \
+            --mode "list" \
+            --imdb "${{ inputs.imdb_id }}" \
+            --title "${{ inputs.title }}"
+
+      - name: 6. Hantar Notifikasi Ralat ke Telegram
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python live_engine_v2/03_telegram_notify.py \
+            --mode "error" \
+            --imdb "${{ inputs.imdb_id }}" \
+            --title "${{ inputs.title }}" \
+            --workflow "X03_series_seeder_list.yml" \
+            --error "Gagal mengekstrak atau menyimpan senarai seeder siri ke Redis."

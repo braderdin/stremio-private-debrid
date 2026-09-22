@@ -13,3 +13,6 @@ camoufox[geoip]>=0.5.6
 DrissionPage>=4.1.1.4
 beautifulsoup4>=4.15.0
 tenacity>=9.1.4
+guessit>=4.4.0
+cinemagoer>=2023.5.1
+rapidfuzz>=3.0.0
