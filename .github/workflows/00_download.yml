@@ -75,3 +75,28 @@ jobs:
             --imdb "${{ inputs.imdb_id }}" \
             --idx "${{ inputs.file_idx }}" \
             --title "${{ inputs.title }}"
+
+      - name: 8. Hantar Notifikasi Selesai Muat Turun ke Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          REDIS_ACCOUNTS_JSON: ${{ secrets.REDIS_ACCOUNTS_JSON }}
+        run: |
+          python live_engine_v2/03_telegram_notify.py \
+            --mode "download" \
+            --imdb "${{ inputs.imdb_id }}" \
+            --hash "${{ inputs.info_hash }}" \
+            --title "${{ inputs.title }}"
+
+      - name: 9. Hantar Notifikasi Ralat ke Telegram
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python live_engine_v2/03_telegram_notify.py \
+            --mode "error" \
+            --imdb "${{ inputs.imdb_id }}" \
+            --title "${{ inputs.title }}" \
+            --workflow "00_download.yml" \
+            --error "Proses aria2c muat turun atau pemindahan ke storan B2 gagal."
