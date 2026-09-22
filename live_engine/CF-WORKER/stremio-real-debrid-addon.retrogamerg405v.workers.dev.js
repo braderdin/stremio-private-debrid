@@ -1,235 +1,220 @@
 /**
- * Cloudflare Worker: Stremio Private Debrid Addon Engine
- * Mengendalikan Manifest, Torrentio Resolver, Sharding Modulo Redis, dan GitHub Action Dispatch.
+ * CLOUDFLARE WORKER: B2 PRIVATE DEBRID ADDON (v2.3.0)
+ * INTEGRASI: DIRECT YTS BRIDGE + CRC32 REDIS SHARDS + GITHUB DISPATCH
  */
 
-let cachedRedisAccounts = null;
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) {
+      c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    }
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+
+function calculateCRC32(str) {
+  let crc = 0 ^ (-1);
+  for (let i = 0; i < str.length; i++) {
+    crc = (crc >>> 8) ^ CRC_TABLE[(crc ^ str.charCodeAt(i)) & 0xFF];
+  }
+  return (crc ^ (-1)) >>> 0;
+}
+
+let cachedRedis = null;
 
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    const pathParts = url.pathname.split("/").filter(Boolean);
+    const parts = url.pathname.split("/").filter(Boolean);
 
-    const corsHeaders = {
+    const cors = {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type",
       "Content-Type": "application/json; charset=utf-8",
     };
 
-    if (request.method === "OPTIONS") {
-      return new Response(null, { headers: corsHeaders });
+    if (request.method === "OPTIONS") return new Response(null, { headers: cors });
+
+    const token = parts[0];
+    if (!token || token !== (env.ADDON_SECRET_TOKEN || "Harunosakura1122")) {
+      return new Response(JSON.stringify({ error: "Akses tanpa kebenaran" }), { status: 401, headers: cors });
     }
 
-    // 1. Semakan Keselamatan Token
-    const requestToken = pathParts[0];
-    const validToken = env.ADDON_SECRET_TOKEN || "Harunosakura1122";
+    const route = parts[1];
 
-    if (!requestToken || requestToken !== validToken) {
-      return new Response(JSON.stringify({ error: "Akses tanpa kebenaran" }), {
-        status: 401,
-        headers: corsHeaders,
-      });
-    }
-
-    const route = pathParts[1];
-
-    // 2. Endpoint Manifest (/manifest.json)
-    if (route === "manifest.json" || pathParts.length === 1) {
-      const manifest = {
+    // 1. Manifest
+    if (route === "manifest.json" || parts.length === 1) {
+      return new Response(JSON.stringify({
         id: "org.braderdin.privatedebrid",
-        version: "1.0.0",
+        version: "2.3.0",
         name: "B2 Private Debrid",
-        description: "Private High-Speed Torrent Caching & Direct Streaming via B2",
-        resources: ["stream"],
+        description: "High-Speed Private Debrid via Backblaze B2 Multi-Storage",
+        resources: ["stream", "catalog"],
         types: ["movie", "series"],
-        catalogs: [],
-      };
-      return new Response(JSON.stringify(manifest), { headers: corsHeaders });
+        idPrefixes: ["tt"],
+        catalogs: [{ type: "movie", id: "b2_vault", name: "B2 Private Cloud" }],
+      }), { headers: cors });
     }
 
-    // 3. Endpoint Trigger Muat Turun (/trigger)
-    // Dipanggil apabila pengguna menekan link torrent yang belum ada di B2
+    // 2. Katalog Filem Siap di B2
+    if (route === "catalog" && parts.length >= 4) {
+      const metas = await getReadyCatalog(env);
+      return new Response(JSON.stringify({ metas }), { headers: cors });
+    }
+
+    // 3. Trigger Endpoint
     if (route === "trigger") {
-      const targetHash = url.searchParams.get("hash");
+      const targetHash = url.searchParams.get("hash") || "AUTO";
       const targetId = url.searchParams.get("id");
-      const targetTitle = url.searchParams.get("title") || "video";
-      const fileIdx = url.searchParams.get("idx") || "0";
+      const targetTitle = url.searchParams.get("title") || "Movie";
 
-      if (targetHash && targetId) {
-        // Cetuskan GitHub Actions di latar belakang
-        ctx.waitUntil(triggerGitHubDownloader(env, targetHash, targetId, fileIdx, targetTitle));
+      if (targetId) {
+        ctx.waitUntil(triggerGitHub(env, targetHash, targetId, targetTitle));
       }
-
-      // Alihkan pemain Stremio ke video makluman pendek agar tidak berlaku "Playback Error"
-      // Menggunakan klip MP4 3 saat rasmi yang selamat dan pantas
       return Response.redirect("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4", 302);
     }
 
-    // 4. Endpoint Streams (/stream/{type}/{id}.json)
-    if (route === "stream" && pathParts.length >= 4) {
-      const type = pathParts[2];
-      const rawId = pathParts[3].replace(".json", ""); // cth: tt0186945 atau tt0903747:1:1
-
+    // 4. Stream Resolver
+    if (route === "stream" && parts.length >= 4) {
+      const rawId = parts[3].replace(".json", "");
       const proxyBase = (env.CF_WORKER_B2_PROXY_STORAGE || "").replace(/\/+$/, "");
-      const workerBase = url.origin;
 
       try {
-        const accounts = getRedisAccounts(env);
-        const targetShard = getTargetRedisShard(rawId, accounts);
+        const shard = getRedisShard(rawId, env);
+        const cached = await fetchRedis(shard, `stremio:${rawId}`);
 
-        // Semak jika video sudah siap disimpan di B2
-        const cachedMeta = await fetchRedisData(targetShard, `stremio:${rawId}`);
-
-        if (cachedMeta && cachedMeta.b2_bucket && cachedMeta.file_path) {
-          // JIKA SUDAH SIAP: Berikan pautan video B2 laju
-          const streamUrl = `${proxyBase}/${cachedMeta.b2_bucket}/${cachedMeta.file_path}`;
+        // Jika sudah siap di B2
+        if (cached && cached.b2_bucket && cached.file_path) {
+          const streamUrl = `${proxyBase}/${cached.b2_bucket}/${cached.file_path.replace(/^\/+/, "")}`;
           return new Response(JSON.stringify({
-            streams: [
-              {
-                name: `[⚡ B2 Fast Stream]`,
-                title: `${cachedMeta.title || rawId}\n💾 Server: ${cachedMeta.b2_bucket}\n⚡ Status: Sedia Ditonton`,
-                url: streamUrl,
-              }
-            ]
-          }), { headers: corsHeaders });
+            streams: [{
+              name: "[⚡ B2 Fast Stream]",
+              title: `${cached.title || rawId}\n💾 Server: ${cached.b2_bucket}\n⚡ Status: Sedia Ditonton`,
+              url: streamUrl,
+            }]
+          }), { headers: cors });
         }
 
-        // JIKA BELUM ADA: Ambil senarai torrent dari Torrentio API
-        const torrentioUrl = `https://torrentio.strem.fun/stream/${type}/${rawId}.json`;
-        const tResp = await fetch(torrentioUrl, {
-          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
-        });
-
-        if (!tResp.ok) {
-          return new Response(JSON.stringify({ streams: [] }), { headers: corsHeaders });
-        }
-
-        const tData = await tResp.json();
-        const incomingStreams = tData.streams || [];
-
-        // Ubah senarai torrent kepada pautan pencetus muat turun
-        const finalStreams = incomingStreams.map((stream) => {
-          const hash = stream.infoHash;
-          const fileIdx = stream.fileIdx !== undefined ? stream.fileIdx : 0;
-          const titleText = stream.title || stream.name || "Torrent";
-
-          // Format butang tindakan klik
-          const triggerUrl = `${workerBase}/${requestToken}/trigger?hash=${hash}&id=${rawId}&idx=${fileIdx}&title=${encodeURIComponent(titleText.split("\n")[0])}`;
-
-          return {
-            name: `[📥 Sedut ke B2]`,
-            title: `${titleText}\n⚡ Klik untuk muat turun ke storan awan B2`,
-            url: triggerUrl,
-          };
-        });
-
-        return new Response(JSON.stringify({ streams: finalStreams }), { headers: corsHeaders });
-
-      } catch (err) {
-        console.error("Stream Handler Error:", err);
+        // Strategi B: Ambil pilihan kualiti rasmi dari YTS API
+        const streams = await fetchDirectTorrents(rawId, url.origin, token);
+        return new Response(JSON.stringify({ streams }), { headers: cors });
+      } catch (e) {
+        console.error("Stream Handler Error:", e);
       }
-
-      return new Response(JSON.stringify({ streams: [] }), { headers: corsHeaders });
+      return new Response(JSON.stringify({ streams: [] }), { headers: cors });
     }
 
-    return new Response(JSON.stringify({ error: "Not Found" }), { status: 404, headers: corsHeaders });
+    return new Response(JSON.stringify({ error: "Not Found" }), { status: 404, headers: cors });
   },
 };
 
-/**
- * Pengurusan Sharding 4 Akaun Upstash Redis
- */
-function getRedisAccounts(env) {
-  if (cachedRedisAccounts && cachedRedisAccounts.length > 0) return cachedRedisAccounts;
-
-  let accounts = [];
-  const rawJson = (env.REDIS_ACCOUNTS_JSON || "").trim();
-
-  if (rawJson) {
+function getRedisShard(imdbId, env) {
+  if (!cachedRedis) {
     try {
-      const parsed = JSON.parse(rawJson);
-      if (Array.isArray(parsed)) {
-        accounts = parsed.map((acc, idx) => ({
-          index: acc.index || idx + 1,
-          url: (acc.redis_rest_url || acc.url).trim().replace(/\/+$/, ""),
-          token: (acc.redis_rest_token || acc.token).trim(),
-        }));
-        accounts.sort((a, b) => a.index - b.index);
-      }
-    } catch (e) {}
+      cachedRedis = JSON.parse(env.REDIS_ACCOUNTS_JSON || "[]");
+    } catch (e) {
+      cachedRedis = [];
+    }
   }
-  cachedRedisAccounts = accounts;
-  return accounts;
+  if (!cachedRedis.length) return null;
+  const idx = calculateCRC32(imdbId) % cachedRedis.length;
+  const acc = cachedRedis[idx];
+  return { url: (acc.redis_rest_url || acc.url).replace(/\/+$/, ""), token: acc.redis_rest_token || acc.token };
 }
 
-/**
- * Kira shard sasaran berasaskan Modulo IMDb ID
- */
-function getTargetRedisShard(imdbId, accounts) {
-  if (!accounts || accounts.length === 0) return null;
-  const match = (imdbId || "").match(/tt(\d+)/);
-  let shardIdx = 0;
-
-  if (match) {
-    shardIdx = parseInt(match[1], 10) % accounts.length;
-  } else {
-    const sum = String(imdbId).split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
-    shardIdx = sum % accounts.length;
-  }
-  return accounts[shardIdx];
-}
-
-/**
- * Pembantu membaca data dari Upstash REST API
- */
-async function fetchRedisData(account, key) {
-  if (!account || !account.url || !account.token) return null;
+async function fetchRedis(shard, key) {
+  if (!shard) return null;
   try {
-    const res = await fetch(`${account.url}/get/${key}`, {
-      headers: { Authorization: `Bearer ${account.token}` },
-    });
+    const res = await fetch(`${shard.url}/get/${key}`, { headers: { Authorization: `Bearer ${shard.token}` } });
     if (!res.ok) return null;
-    const data = await res.json();
-    if (data && data.result) {
-      return typeof data.result === "string" ? JSON.parse(data.result) : data.result;
+    const d = await res.json();
+    return typeof d.result === "string" ? JSON.parse(d.result) : d.result;
+  } catch (e) { return null; }
+}
+
+async function getReadyCatalog(env) {
+  const shard = getRedisShard("tt0000000", env);
+  if (!shard) return [];
+  try {
+    const res = await fetch(`${shard.url}/zrevrange/timeline:lru/0/49`, { headers: { Authorization: `Bearer ${shard.token}` } });
+    const ids = (await res.json()).result || [];
+    const out = [];
+    for (const id of ids) {
+      const m = await fetchRedis(shard, `stremio:${id}`);
+      if (m && m.imdb_id) {
+        out.push({
+          id: m.imdb_id,
+          type: "movie",
+          name: m.title || m.imdb_id,
+          poster: `https://images.metahub.space/poster/medium/${m.imdb_id}/img`,
+        });
+      }
+    }
+    return out;
+  } catch (e) { return []; }
+}
+
+async function fetchDirectTorrents(imdbId, origin, token) {
+  const baseId = imdbId.split(":")[0];
+  const list = [];
+
+  try {
+    const ctrl = new AbortController();
+    const timeoutId = setTimeout(() => ctrl.abort(), 2500); // 2.5s guard
+    const resp = await fetch(`https://yts.mx/api/v2/list_movies.json?query_term=${baseId}`, { signal: ctrl.signal });
+    clearTimeout(timeoutId);
+
+    if (resp.ok) {
+      const data = await resp.json();
+      const movie = data?.data?.movies?.[0];
+      if (movie && Array.isArray(movie.torrents)) {
+        for (const t of movie.torrents) {
+          const q = t.quality || "HD";
+          const sz = t.size || "1.5 GB";
+          const seeds = t.seeds || 10;
+          const trUrl = `${origin}/${token}/trigger?hash=${t.hash}&id=${imdbId}&title=${encodeURIComponent(movie.title + " " + q)}`;
+
+          list.push({
+            name: `[📥 Sedut B2] ${q}`,
+            title: `${movie.title} (${movie.year}) [${q}]\n💾 Saiz: ${sz}  |  👤 ${seeds} Seeders\n⚡ Klik untuk muat turun terus ke B2`,
+            url: trUrl,
+          });
+        }
+      }
     }
   } catch (e) {}
-  return null;
+
+  // Sentiasa sediakan pilihan Auto Fallback di bawah
+  list.push({
+    name: `[📥 Minta Sedut B2 (Auto)]`,
+    title: `IMDb: ${imdbId}\n⚡ Klik untuk arahkan Runner cari & sedut sumber terbaik secara pintar`,
+    url: `${origin}/${token}/trigger?hash=AUTO&id=${imdbId}&title=${imdbId}`,
+  });
+
+  return list;
 }
 
-/**
- * Menghantar arahan terus ke GitHub Actions Workflow
- */
-async function triggerGitHubDownloader(env, hash, imdbId, fileIdx, title) {
-  const ghOwner = env.GH_OWNER || "braderdin";
-  const ghRepo = env.GH_REPO || "stremio-private-debrid";
-  const workflowFile = env.GH_WORKFLOW_FILE || "download.yml";
-  const ghPat = env.GH_PAT;
+async function triggerGitHub(env, hash, imdbId, title) {
+  const pat = env.GH_PAT;
+  if (!pat) return;
+  const owner = env.GH_OWNER || "braderdin";
+  const repo = env.GH_REPO || "stremio-private-debrid";
+  const workflow = env.GH_WORKFLOW_FILE || "00_download.yml";
 
-  if (!ghPat) return;
-
-  const dispatchUrl = `https://api.github.com/repos/${ghOwner}/${ghRepo}/actions/workflows/${workflowFile}/dispatches`;
-
-  try {
-    await fetch(dispatchUrl, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${ghPat}`,
-        Accept: "application/vnd.github+json",
-        "User-Agent": "Cloudflare-Worker-Debrid-Trigger",
-      },
-      body: JSON.stringify({
-        ref: "main",
-        inputs: {
-          info_hash: hash,
-          imdb_id: imdbId,
-          file_idx: String(fileIdx),
-          title: title,
-        },
-      }),
-    });
-  } catch (e) {
-    console.error("GitHub Action Trigger Error:", e);
-  }
+  await fetch(`https://api.github.com/repos/${owner}/${repo}/actions/workflows/${workflow}/dispatches`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${pat}`,
+      Accept: "application/vnd.github+json",
+      "User-Agent": "CF-Worker-Trigger",
+    },
+    body: JSON.stringify({
+      ref: "main",
+      inputs: { info_hash: hash, imdb_id: imdbId, file_idx: "0", title: title },
+    }),
+  }).catch((e) => console.error(e));
 }

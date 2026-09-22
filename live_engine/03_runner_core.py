@@ -2,7 +2,7 @@
 # ==============================================================================
 # PROJEK: STREMIO PRIVATE DEBRID - RUNNER CORE ENGINE (03_runner_core.py)
 # LOKASI: /home/braderdin/stremio-private-debrid/live_engine/03_runner_core.py
-# CIRI: SEAMLESS AUTO-RESOLVE + ARIA2C + B2 STORAGE UPLOADER + REDIS METADATA
+# CIRI: HASH-AWARE SEMAKAN + ARIA2C + B2 MULTI-STREAM UPLOADER + REDIS METADATA
 # ==============================================================================
 
 import os
@@ -64,17 +64,33 @@ def calculate_sha256(filepath: Path) -> str:
     return sha.hexdigest()
 
 
-def sanitize_b2_path(imdb_id: str, original_filename: str) -> Tuple[str, str]:
+def detect_resolution(title: str) -> str:
+    """Mengesan resolusi video berdasarkan tajuk fail/torrent."""
+    t = title.lower()
+    if "2160" in t or "4k" in t:
+        return "4K"
+    if "1080" in t:
+        return "1080p"
+    if "720" in t:
+        return "720p"
+    if "480" in t:
+        return "480p"
+    if any(k in t for k in ["cam", "telesync", "hdcam", "ts"]):
+        return "CAM"
+    return "HD"
+
+
+def sanitize_b2_path(imdb_id: str, info_hash: str, original_filename: str) -> Tuple[str, str]:
     """
-    Menukarkan semua ruang kosong dan simbol pelik menjadi titik '.'
-    supaya tiada ralat URL pada proxy dan pemain Stremio.
+    Menukarkan aksara pelik menjadi '.' serta menyelitkan 8-aksara hash unik
+    bagi mengelakkan perlanggaran nama fail berbilang versi di storan B2.
     """
     p = Path(original_filename)
     ext = p.suffix.lower() if p.suffix else ".mp4"
     stem = p.stem
+    short_hash = (info_hash or "00000000")[:8].lower()
 
-    # Bersihkan aksara: hanya abjad & nombor dibenarkan, yang lain jadi '.'
-    raw_combined = f"{imdb_id}.{stem}"
+    raw_combined = f"{imdb_id}.{short_hash}.{stem}"
     clean_stem = re.sub(r"[^a-zA-Z0-9]+", ".", raw_combined).strip(".")
     clean_stem = re.sub(r"\.+", ".", clean_stem)
 
@@ -95,7 +111,7 @@ def run_aria2c(magnet: str, out_dir: Path, file_idx: int) -> Optional[Path]:
         cmd.append(f"--select-file={file_idx + 1}")
     cmd.append(magnet)
 
-    console.print(f"[cyan]🚀 aria2c memulakan proses muat turun...[/cyan]")
+    console.print("[cyan]🚀 aria2c memulakan proses muat turun...[/cyan]")
     res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     if res.returncode != 0:
         console.print(f"[bold red]❌ aria2c gagal (Kod {res.returncode}):[/bold red]\n{res.stdout[-500:]}")
@@ -118,13 +134,7 @@ def execute_job(info_hash: str, imdb_id: str, file_idx: int, raw_title: str):
         border_style="cyan"
     ))
 
-    # 1. Semakan Cache Redis Sedia Ada
-    existing = db.get_stream_metadata(imdb_id)
-    if existing and existing.get("b2_bucket") and existing.get("file_path"):
-        console.print("[bold green]✨ Fail ini sudah wujud dalam pangkalan data B2! Selesai.[/bold green]")
-        return
-
-    # 2. Pengendalian Hash "AUTO" Melalui Modul 04_resolver
+    # 1. Pengendalian Hash "AUTO" Melalui Modul 04_resolver
     if info_hash.strip().upper() == "AUTO" or len(info_hash.strip()) != 40:
         try:
             resolver = importlib.import_module("04_resolver")
@@ -145,14 +155,45 @@ def execute_job(info_hash: str, imdb_id: str, file_idx: int, raw_title: str):
             table.add_row("Saiz Fail", f"{resolved['size'] / (1024*1024):.2f} MB")
             table.add_row("Seeders", str(resolved["seeders"]))
             console.print(table)
-
         except Exception as e:
             console.print(f"[bold red]❌ Ralat semasa memanggil 04_resolver: {e}[/bold red]")
             sys.exit(1)
 
+    target_hash = info_hash.lower().strip()
+
+    # 2. Semakan Pintar Berasaskan InfoHash (Hash-Aware Verification)
+    # Semak sama ada fail khusus dengan InfoHash ini sudah selesai dimuat naik ke B2
+    cached_torrent = db.get_torrent_cache(target_hash)
+    existing = db.get_stream_metadata(imdb_id)
+
+    hash_exists_in_b2 = False
+    if existing:
+        if isinstance(existing, list):
+            hash_exists_in_b2 = any(
+                isinstance(item, dict) and item.get("info_hash", "").lower() == target_hash and item.get("file_path")
+                for item in existing
+            )
+        elif isinstance(existing, dict):
+            if "streams" in existing and isinstance(existing["streams"], list):
+                hash_exists_in_b2 = any(
+                    isinstance(item, dict) and item.get("info_hash", "").lower() == target_hash and item.get("file_path")
+                    for item in existing["streams"]
+                )
+            elif existing.get("info_hash", "").lower() == target_hash and existing.get("file_path"):
+                hash_exists_in_b2 = True
+
+    if hash_exists_in_b2 or (cached_torrent and hash_exists_in_b2):
+        console.print(Panel.fit(
+            f"[bold green]✨ Torrent dengan InfoHash ini sudah wujud dalam B2!\n"
+            f"Hash: {target_hash}\n"
+            f"Proses muat turun tidak perlu diulang.[/bold green]",
+            border_style="green"
+        ))
+        return
+
     # 3. Direktori Sementara & Pelaksanaan aria2c
-    job_dir = TEMP_DIR / f"job_{info_hash[:10]}_{int(time.time())}"
-    magnet_url = build_magnet(info_hash, raw_title)
+    job_dir = TEMP_DIR / f"job_{target_hash[:10]}_{int(time.time())}"
+    magnet_url = build_magnet(target_hash, raw_title)
 
     try:
         video_file = run_aria2c(magnet_url, job_dir, file_idx)
@@ -169,8 +210,8 @@ def execute_job(info_hash: str, imdb_id: str, file_idx: int, raw_title: str):
             console.print("[bold red]❌ Storan B2 tidak mencukupi untuk menampung fail.[/bold red]")
             sys.exit(1)
 
-        # 5. Penapisan Nama Fail Bebas Ralat Simbol / Space
-        clean_filename, b2_path = sanitize_b2_path(imdb_id, video_file.name)
+        # 5. Penapisan Nama Fail Bebas Ralat Simbol & Mengandungi Hash Unik
+        clean_filename, b2_path = sanitize_b2_path(imdb_id, target_hash, video_file.name)
         console.print(f"[cyan]📁 Nama Destinasi B2 Diselaraskan:[/cyan] [bold white]{b2_path}[/bold white]")
 
         # 6. Pemindahan ke B2 Melalui Storage Manager
@@ -180,15 +221,16 @@ def execute_job(info_hash: str, imdb_id: str, file_idx: int, raw_title: str):
             sys.exit(1)
 
         # 7. Pendaftaran Metadata ke Upstash Redis
+        resolution = detect_resolution(raw_title)
         metadata = {
             "title": raw_title,
-            "resolution": "1080p" if "1080" in raw_title else "HD",
+            "resolution": resolution,
             "file_name": clean_filename,
             "file_path": b2_path,
             "size_bytes": file_size,
             "b2_account_index": b2_target["index"],
             "b2_bucket": b2_target["bucket_name"],
-            "info_hash": info_hash.lower(),
+            "info_hash": target_hash,
             "sha256": sha256_hash,
             "created_at": int(time.time()),
         }
