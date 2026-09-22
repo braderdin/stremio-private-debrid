@@ -3,7 +3,7 @@
 # PROJEK: STREMIO PRIVATE DEBRID V3 - SERIES & MOVIE RUNNER CORE ENGINE
 # LOKASI: /home/braderdin/stremio-private-debrid/live_engine_v3/X04_series_runner_core.py
 # CIRI:
-# 1. Mengimport 100% Modul Asal: 00_config, 01_redis_db, 02_b2_storage dari live_engine/
+# 1. Mengimport 100% Modul Asal: 00_config, X01_series_redis, X02_series_b2storage dari live_engine/
 # 2. Sokongan Penuh Siri TV (tt...:S:E) & Filem Biasa (tt...)
 # 3. aria2c Bersasar: Muat turun episod khusus daripada Season Pack (--select-file)
 # 4. Pengecaman Episod Pintar jika terdapat pelbagai fail video di folder muat turun
@@ -39,11 +39,11 @@ for p in [CURRENT_DIR, LIVE_ENGINE_DIR]:
 
 try:
     _config = importlib.import_module("00_config")
-    _redis_mod = importlib.import_module("01_redis_db")
-    _b2_mod = importlib.import_module("02_b2_storage")
+    _redis_mod = importlib.import_module("X01_series_redis")
+    _b2_mod = importlib.import_module("X02_series_b2storage")
 
-    db = getattr(_redis_mod, "db")
-    storage = getattr(_b2_mod, "storage")
+    db = getattr(_redis_mod, "series_db")
+    storage = getattr(_b2_mod, "series_storage")
     TEMP_DIR = getattr(_config, "TEMP_DIR", CURRENT_DIR / "temp")
 except Exception as e:
     console.print(f"[bold red]❌ Ralat import modul asas dari live_engine: {e}[/bold red]")
@@ -287,7 +287,7 @@ def execute_job(info_hash: str, raw_imdb_id: str, file_idx: int, raw_title: str)
         file_size = video_file.stat().st_size
         sha256_hash = calculate_sha256(video_file)
 
-        # 4. Agihan Storan B2 (20 Akaun Round-Robin & LRU Eviction dari live_engine/02_b2_storage.py)
+        # 4. Agihan Storan B2 (20 Akaun Round-Robin & LRU Eviction dari live_engine/X02_series_b2storage.py)
         b2_target = storage.allocate_storage_with_eviction(file_size, db)
         if not b2_target:
             console.print("[bold red]❌ Storan B2 tidak mencukupi untuk menampung fail.[/bold red]")

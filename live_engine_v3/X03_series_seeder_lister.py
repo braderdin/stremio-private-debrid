@@ -36,10 +36,10 @@ for p in [CURRENT_DIR, V2_DIR]:
         sys.path.insert(0, str(p))
 
 try:
-    _redis_client_mod = importlib.import_module("01_redis_client")
-    db_v2 = getattr(_redis_client_mod, "db_v2")
+    _redis_client_mod = importlib.import_module("X01_series_redis")
+    db_v2 = getattr(_redis_client_mod, "series_db")
 except Exception as e:
-    console.print(f"[bold red]❌ Gagal mengimport modul 01_redis_client: {e}[/bold red]")
+    console.print(f"[bold red]❌ Gagal mengimport modul X01_series_redis: {e}[/bold red]")
     sys.exit(1)
 
 
