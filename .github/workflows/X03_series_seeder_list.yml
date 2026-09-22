@@ -38,7 +38,16 @@ jobs:
           pip install -r requirements-runner.txt
           pip install guessit
 
-      - name: 4. Laksanakan Enjin X03_series_seeder_lister.py
+      - name: 4. Picu Pengikis Sarikata di Repo Subtitle (Async)
+        continue-on-error: true
+        run: |
+          curl -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.GH_PAT }}" \
+            https://api.github.com/repos/braderdin/stremio-sub-addon/dispatches \
+            -d '{"event_type":"ondemand_scrape","client_payload":{"imdb_id":"${{ inputs.imdb_id }}"}}'
+
+      - name: 5. Laksanakan Enjin X03_series_seeder_lister.py
         env:
           REDIS_ACCOUNTS_JSON: ${{ secrets.REDIS_ACCOUNTS_JSON }}
         run: |
@@ -46,7 +55,7 @@ jobs:
             --imdb "${{ inputs.imdb_id }}" \
             --title "${{ inputs.title }}"
 
-      - name: 5. Hantar Notifikasi Senarai Seeder ke Telegram
+      - name: 6. Hantar Notifikasi Senarai Seeder ke Telegram
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -57,7 +66,7 @@ jobs:
             --imdb "${{ inputs.imdb_id }}" \
             --title "${{ inputs.title }}"
 
-      - name: 6. Hantar Notifikasi Ralat ke Telegram
+      - name: 7. Hantar Notifikasi Ralat ke Telegram
         if: failure()
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
