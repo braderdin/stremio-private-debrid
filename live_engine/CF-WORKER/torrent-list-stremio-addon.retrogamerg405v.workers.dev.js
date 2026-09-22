@@ -1,11 +1,12 @@
 /**
  * ==============================================================================
- * PROJEK: STREMIO PRIVATE DEBRID V2 - SMART TORRENT PICKER
+ * PROJEK: STREMIO PRIVATE DEBRID V2 - SMART TORRENT PICKER (MULTI-STREAM)
  * WORKER: torrent-list-stremio-addon.retrogamerg405v.workers.dev
  * CIRI: 
- * 1. Kunci Penyejuk Atomik Redis 2 Minit (120s) untuk sekat pemicu berganda TV.
- * 2. Paparan Hibrid: Video siap B2 di atas + Senarai kualiti lain kekal di bawah.
- * 3. Butang Kemas Kini Senarai torrent sentiasa tersedia di bawah sekali.
+ * 1. Sokongan Penuh Multi-Stream: Papar semua kualiti sedia tonton di B2.
+ * 2. Penapisan Hash Pintar: Halang torrent sedia ada muncul semula di butang sedut.
+ * 3. Kunci Penyejuk Atomik Redis 2 Minit (120s) untuk menyekat pemicu berganda TV.
+ * 4. Butang Kemas Kini Senarai (Refresh) sentiasa tersedia di bawah sekali.
  * ==============================================================================
  */
 
@@ -65,7 +66,7 @@ export default {
     if (route === "manifest.json" || pathParts.length === 1) {
       const manifest = {
         id: "org.braderdin.privatedebrid.v2",
-        version: "2.1.0",
+        version: "2.2.0",
         name: "B2 Debrid V2 (Smart Picker)",
         description: "Pilih Kualiti & Seeder Terbanyak Sebelum Muat Turun ke B2",
         resources: ["stream"],
@@ -134,25 +135,42 @@ export default {
         ]);
 
         const streamResults = [];
+        const activeHashes = new Set();
 
-        // BAHAGIAN A: Jika video sudah siap di B2 (Paparkan di Slot Teratas)
-        if (cachedMeta && cachedMeta.b2_bucket && cachedMeta.file_path) {
-          const streamUrl = `${proxyBase}/${cachedMeta.b2_bucket}/${cachedMeta.file_path.replace(/^\/+/, "")}`;
-          streamResults.push({
-            name: `[⚡ B2 Fast Stream]`,
-            title: `${cachedMeta.title || rawId}\n💾 Server: ${cachedMeta.b2_bucket}\n⚡ Sedia Ditonton Berkelajuan Tinggi`,
-            url: streamUrl,
-            behaviorHints: { bingeGroup: `b2-v2-ready-${rawId}`, notWebReady: false }
-          });
+        // BAHAGIAN A: Ekstrak semua versi siap di B2 (Multi-Stream)
+        let readyStreams = [];
+        if (cachedMeta) {
+          if (Array.isArray(cachedMeta.streams) && cachedMeta.streams.length > 0) {
+            readyStreams = cachedMeta.streams;
+          } else if (cachedMeta.b2_bucket && cachedMeta.file_path) {
+            readyStreams = [cachedMeta];
+          }
         }
 
-        // BAHAGIAN B: Jika senarai torrent wujud, paparkan pilihan kualiti lain
-        if (Array.isArray(cachedList) && cachedList.length > 0) {
-          const activeHash = (cachedMeta?.info_hash || "").toLowerCase().trim();
+        for (const s of readyStreams) {
+          if (s.info_hash) {
+            activeHashes.add(s.info_hash.toLowerCase().trim());
+          }
 
+          if (s.b2_bucket && s.file_path) {
+            const streamUrl = `${proxyBase}/${s.b2_bucket}/${s.file_path.replace(/^\/+/, "")}`;
+            const resTag = s.resolution ? ` [${s.resolution}]` : "";
+            const sizeTag = s.size_bytes ? ` | 💾 ${formatBytes(s.size_bytes)}` : "";
+
+            streamResults.push({
+              name: `[⚡ B2 Fast Stream]${resTag}`,
+              title: `${s.title || rawId}${sizeTag}\n💾 Server: ${s.b2_bucket}\n⚡ Sedia Ditonton Berkelajuan Tinggi`,
+              url: streamUrl,
+              behaviorHints: { bingeGroup: `b2-ready-${rawId}-${s.info_hash || 'def'}`, notWebReady: false }
+            });
+          }
+        }
+
+        // BAHAGIAN B: Jika senarai torrent wujud, paparkan pilihan kualiti lain (tapis hash sedia ada)
+        if (Array.isArray(cachedList) && cachedList.length > 0) {
           for (const item of cachedList) {
             const itemHash = (item.info_hash || "").toLowerCase().trim();
-            if (activeHash && itemHash === activeHash) continue; // Langkau hash yang sedang aktif di B2
+            if (itemHash && activeHashes.has(itemHash)) continue; // Langkau jika versi ini sudah ada di B2
 
             const cleanTitle = (item.name || "Torrent").replace(/[^\w\s\.\-]/g, "");
             const sizeText = formatBytes(item.size || 0);
@@ -170,9 +188,8 @@ export default {
           }
         }
 
-        // BAHAGIAN C: Pastikan butang Refresh / Trigger sentiasa ada
+        // BAHAGIAN C: Butang navigasi (Refresh jika ada data, atau Dapatkan Senarai jika kosong)
         if (streamResults.length > 0) {
-          // Jika sudah ada video siap ATAU ada senarai, letakkan butang Refresh di bawah sekali
           const refreshUrl = `${workerBase}/${requestToken}/trigger_list?id=${rawId}&title=${rawId}`;
           streamResults.push({
             name: `[🔄 Kemas Kini Senarai]`,
@@ -181,7 +198,6 @@ export default {
             behaviorHints: { bingeGroup: `b2-v2-refresh-${rawId}`, notWebReady: false }
           });
         } else {
-          // Jika langsung tiada data (filem baru), paparkan butang pemicu asal
           const listTriggerUrl = `${workerBase}/${requestToken}/trigger_list?id=${rawId}&title=${rawId}`;
           streamResults.push({
             name: `[📋 Dapatkan Senarai Torrent]`,
@@ -238,7 +254,7 @@ function getTargetRedisShard(keyIdentifier, accounts) {
 }
 
 /**
- * Fungsi Kunci Atomik Redis (SET key value EX seconds NX)
+ * Kunci Atomik Redis (SET key value EX seconds NX)
  */
 async function acquireRedisLock(account, lockKey, ttlSeconds) {
   if (!account || !account.url || !account.token) return true;

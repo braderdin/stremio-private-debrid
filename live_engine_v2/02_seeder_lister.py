@@ -2,7 +2,7 @@
 # ==============================================================================
 # PROJEK: STREMIO PRIVATE DEBRID V2 - SEEDER LISTER (02_seeder_lister.py)
 # LOKASI: /home/braderdin/stremio-private-debrid/live_engine_v2/02_seeder_lister.py
-# CIRI: DUAL ENGINE (APIBAY + TORRENTIO) + DEDUPLICATION + REDIS AUTO-CACHE
+# CIRI: DUAL ENGINE (APIBAY + TORRENTIO) + SOURCE TRACKER + REDIS AUTO-CACHE
 # ==============================================================================
 
 import re
@@ -32,6 +32,7 @@ except Exception as e:
 
 
 def detect_quality(name: str) -> str:
+    """Mengesan resolusi video berdasarkan nama pelepasan torrent."""
     n = name.lower()
     if any(q in n for q in ["2160p", "4k", "uhd"]):
         return "4K"
@@ -67,7 +68,7 @@ def parse_torrentio_title(raw_title: str) -> Dict[str, Any]:
 
 
 def fetch_apibay_torrents(imdb_id: str) -> List[Dict[str, Any]]:
-    """Menyaring torrent daripada Apibay (ThePirateBay)."""
+    """Menyaring torrent daripada Apibay (ThePirateBay) dan menandakan sumber Apibay."""
     url = f"https://apibay.org/q.php?q={imdb_id}"
     out = []
     for profile in ["safari15_5", "chrome120"]:
@@ -100,7 +101,7 @@ def fetch_apibay_torrents(imdb_id: str) -> List[Dict[str, Any]]:
 
 
 def fetch_torrentio_torrents(imdb_id: str) -> List[Dict[str, Any]]:
-    """Menyaring torrent daripada Torrentio Scraper API."""
+    """Menyaring torrent daripada Torrentio Scraper API dan menandakan sumber Torrentio."""
     url = f"https://torrentio.strem.fun/stream/movie/{imdb_id}.json"
     out = []
     try:
@@ -156,7 +157,11 @@ def process_and_save_seeder_list(imdb_id: str, fallback_title: str = "") -> bool
         if seeds < 1 or sz < MIN_BYTES or sz > MAX_BYTES:
             continue
 
-        # Jika torrent sudah wujud dari penyedia lain, simpan rekod dengan seeder tertinggi
+        # Pastikan medan source sentiasa ada
+        src = item.get("source", "Apibay" if "Apibay" in item.get("source", "") else "Torrentio")
+        item["source"] = src
+
+        # Jika torrent wujud dari kedua-dua tempat, simpan rekod dengan seeder tertinggi
         if h not in unique_torrents or seeds > unique_torrents[h]["seeders"]:
             unique_torrents[h] = item
 
@@ -175,15 +180,16 @@ def process_and_save_seeder_list(imdb_id: str, fallback_title: str = "") -> bool
     if saved:
         table = Table(title=f"📋 Senarai Seeder Gabungan bagi {base_id} ({len(top_torrents)} pilihan)", border_style="green")
         table.add_column("No", justify="center", style="cyan")
-        table.add_column("Sumber", style="yellow")
-        table.add_column("Kualiti", style="magenta")
+        table.add_column("Sumber", justify="center", style="yellow")
+        table.add_column("Kualiti", justify="center", style="magenta")
         table.add_column("Saiz", style="white")
         table.add_column("Seeders", justify="center", style="green")
         table.add_column("Tajuk Torrent", style="dim")
 
         for idx, t in enumerate(top_torrents[:30], 1):
             sz_str = f"{t['size'] / (1024*1024*1024):.2f} GB" if t['size'] >= 1024**3 else f"{t['size'] / (1024*1024):.1f} MB"
-            table.add_row(str(idx), t.get("source", "Auto"), t["quality"], sz_str, str(t["seeders"]), t["name"][:45])
+            src_display = "⚙️ Torrentio" if t.get("source") == "Torrentio" else "🏴‍☠️ Apibay"
+            table.add_row(str(idx), src_display, t["quality"], sz_str, str(t["seeders"]), t["name"][:45])
 
         console.print(table)
         console.print(f"[bold green]✅ Berjaya menyimpan {len(top_torrents)} pilihan ke Redis Shard! (TTL: 24 Jam)[/bold green]")
