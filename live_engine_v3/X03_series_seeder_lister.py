@@ -5,7 +5,7 @@
 # CIRI:
 # 1. Dwi-Enjin Pintar: Torrentio (Multi-line / Season Pack) + Apibay (Cinemeta Query).
 # 2. Pengesahan Pustaka Guessit untuk memastikan episod tepat tanpa ralat regex.
-# 3. Penapisan Saiz Siling: < 5.0 GB bagi Siri TV (100MB - 5GB), < 8.5 GB bagi Filem.
+# 3. Penapisan Saiz Siling: < 5.0 GB bagi Siri TV (30MB - 5GB), < 8.5 GB bagi Filem.
 # 4. Tangkapan 'file_idx' daripada Season Pack untuk muat turun aria2c bersasar.
 # 5. Simpan automatik ke Shard Upstash Redis yang sepadan (TTL: 24 Jam).
 # ==============================================================================
@@ -236,7 +236,7 @@ def process_and_save_seeder_list(raw_imdb_id: str, fallback_title: str = "") -> 
         base_id = target_id
 
     # Tetapan Had Saiz: Siri (< 5.0 GB) | Filem (< 8.5 GB)
-    min_bytes = (100 if is_series else 400) * 1024 * 1024
+    min_bytes = (30 if is_series else 400) * 1024 * 1024
     max_bytes = (5 * 1024 * 1024 * 1024) if is_series else int(8.5 * 1024 * 1024 * 1024)
 
     console.print(Panel.fit(
