@@ -1,0 +1,565 @@
+#!/usr/bin/env python3
+# ==============================================================================
+# PROJEK: STREMIO PRIVATE DEBRID V3 - MULTI-SOURCE SEEDER LISTER (EKSPERIMEN 02)
+# LOKASI: /home/braderdin/stremio-private-debrid/live_engine_v3/exp_test/02_test_multisource_lister.py
+#
+# PEMBAHARUAN V02:
+# 1. Knaben API Aggregator (1337x + TorrentGalaxy + BitSearch + TPB + LimeTorrents).
+# 2. Torrentio Turbo Query: Mengaktifkan kesemua 22 penyedia serentak + susun ikut Seeds.
+# 3. Penapis Simbol Tajuk Pintar (Menghilangkan gangguan '...' atau simbol khas).
+# 4. Apibay Multi-Variant Query (Tajuk + Tahun, Tajuk Sahaja, IMDb ID).
+# 5. Keutamaan Saiz Emas: 500 MB - 3.0 GB (Seeder Tertinggi di atas, siling 6.0 GB).
+# ==============================================================================
+
+import re
+import sys
+import argparse
+import importlib
+from urllib.parse import quote_plus, unquote
+from pathlib import Path
+from typing import Dict, Any, List, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from curl_cffi import requests
+from guessit import guessit
+from rich.console import Console
+from rich.table import Table
+from rich.panel import Panel
+
+console = Console()
+
+# ------------------------------------------------------------------------------
+# 1. KONFIGURASI LALUAN SISTEM
+# ------------------------------------------------------------------------------
+CURRENT_DIR = Path(__file__).resolve().parent
+V3_DIR = CURRENT_DIR.parent
+PROJECT_ROOT = V3_DIR.parent
+V2_DIR = PROJECT_ROOT / "live_engine_v2"
+V1_DIR = PROJECT_ROOT / "live_engine"
+
+for p in [CURRENT_DIR, V3_DIR, V2_DIR, V1_DIR, PROJECT_ROOT]:
+    if p.exists() and str(p) not in sys.path:
+        sys.path.insert(0, str(p))
+
+try:
+    _redis_client_mod = importlib.import_module("X01_series_redis")
+    db_v2 = getattr(_redis_client_mod, "series_db", None)
+except Exception:
+    db_v2 = None
+
+
+# ------------------------------------------------------------------------------
+# 2. PEMBANTU RESOLUSI & PEMBERSIHAN TAJUK
+# ------------------------------------------------------------------------------
+def detect_quality(name: str) -> str:
+    """Mengesan kualiti resolusi daripada teks nama fail."""
+    n = name.lower()
+    if any(q in n for q in ["2160p", "4k", "uhd"]):
+        return "4K"
+    if any(q in n for q in ["1080p", "fhd"]):
+        return "1080p"
+    if any(q in n for q in ["720p", "hd"]):
+        return "720p"
+    if any(q in n for q in ["480p", "sd", "dvdrip"]):
+        return "480p"
+    return "HD"
+
+
+def clean_search_title(raw_title: str) -> str:
+    """Membersihkan simbol khas seperti '...' atau tanda seru untuk carian tepat."""
+    t = re.sub(r"\.{2,}", " ", raw_title)
+    t = re.sub(r"[^\w\s]", " ", t)
+    t = re.sub(r"\s+", " ", t)
+    return t.strip()
+
+
+def fetch_cinemeta_meta(imdb_id: str, is_series: bool) -> Dict[str, str]:
+    """Mengambil tajuk rasmi dan tahun keluaran dari Cinemeta."""
+    base_id = imdb_id.split(":")[0]
+    endpoint_type = "series" if is_series else "movie"
+    url = f"https://v3-cinemeta.strem.io/meta/{endpoint_type}/{base_id}.json"
+
+    meta = {"title": base_id, "year": "", "clean_title": base_id}
+    try:
+        resp = requests.get(url, impersonate="chrome120", timeout=8)
+        if resp.status_code == 200:
+            data = resp.json().get("meta", {})
+            raw_name = data.get("name", "")
+            year = str(data.get("year", ""))
+            if raw_name:
+                meta = {
+                    "title": raw_name,
+                    "year": year,
+                    "clean_title": clean_search_title(raw_name)
+                }
+    except Exception:
+        pass
+    return meta
+
+
+# ------------------------------------------------------------------------------
+# 3. PENGHURAI STRIM UMUM (STREAM PARSER)
+# ------------------------------------------------------------------------------
+def parse_generic_stremio_stream(stream: Dict[str, Any], default_source: str = "Stremio") -> Optional[Dict[str, Any]]:
+    raw_title = stream.get("title", "")
+    info_hash = (stream.get("infoHash") or "").strip().lower()
+    file_idx = stream.get("fileIdx", 0)
+
+    if len(info_hash) != 40 or not raw_title:
+        return None
+
+    lines = [l.strip() for l in raw_title.split("\n") if l.strip()]
+
+    seeds = 0
+    size_bytes = 0
+    source_site = default_source
+
+    for line in lines:
+        seeds_match = re.search(r"[👤👥]\s*([\d,]+)", line) or re.search(r"(?:Seeds?|Seeders?):\s*([\d,]+)", line, re.IGNORECASE)
+        if seeds_match:
+            seeds = int(seeds_match.group(1).replace(",", ""))
+
+        size_match = re.search(r"[💾💿]\s*([\d\.]+)\s*(GB|MB|KB|GiB|MiB)", line, re.IGNORECASE) or \
+                     re.search(r"(?:Size):\s*([\d\.]+)\s*(GB|MB|KB|GiB|MiB)", line, re.IGNORECASE)
+        if size_match:
+            val = float(size_match.group(1))
+            unit = size_match.group(2).upper()
+            if "GB" in unit:
+                size_bytes = int(val * 1024**3)
+            elif "MB" in unit:
+                size_bytes = int(val * 1024**2)
+            elif "KB" in unit:
+                size_bytes = int(val * 1024)
+
+        if any(icon in line for icon in ["⚙️", "🌐", "🏷️"]):
+            src_m = re.search(r"[⚙️️🌐🏷️]\s*([\w\+\.\-]+)", line)
+            if src_m:
+                source_site = src_m.group(1)
+
+    if len(lines) >= 3:
+        release_name = f"{lines[1]} [{lines[0]}]"
+    else:
+        release_name = lines[0] if lines else default_source
+
+    stream_name = stream.get("name", "")
+    quality = detect_quality(f"{stream_name} {raw_title}")
+
+    return {
+        "name": release_name,
+        "info_hash": info_hash,
+        "seeders": seeds,
+        "size": size_bytes,
+        "quality": quality,
+        "source": source_site,
+        "file_idx": int(file_idx or 0),
+    }
+
+
+# ------------------------------------------------------------------------------
+# 4. SUMBER-SUMBER TORRENT TERPILIH (SOURCES V02)
+# ------------------------------------------------------------------------------
+
+# PUNCA 1: Torrentio Turbo (Semua 22 Provider Aktif + Sort Seeders)
+def scrape_torrentio_turbo(target_id: str, is_series: bool) -> List[Dict[str, Any]]:
+    ep_type = "series" if is_series else "movie"
+    providers_str = (
+        "providers=yts,eztv,rarbg,1337x,thepiratebay,kickasstorrents,"
+        "torrentgalaxy,magnetdl,horriblesubs,nyaasi,tokyotosho,anidex,"
+        "rutor,rutracker,comando,bludv,torrent9,ilcorsaronero,mejortorrent,"
+        "wolfmax4k,cinecalidad,besttorrents|sort=seeders"
+    )
+    url = f"https://torrentio.strem.fun/{providers_str}/stream/{ep_type}/{target_id}.json"
+    results = []
+    try:
+        resp = requests.get(url, impersonate="chrome120", timeout=12)
+        if resp.status_code == 200:
+            for s in resp.json().get("streams", []):
+                p = parse_generic_stremio_stream(s, default_source="Torrentio")
+                if p:
+                    results.append(p)
+    except Exception:
+        pass
+    return results
+
+
+# PUNCA 2: Knaben Aggregator API (1337x, TorrentGalaxy, TPB, LimeTorrents, Rutracker, BitSearch)
+def scrape_knaben_aggregator(clean_title: str, year: str, is_series: bool, season: int = 1, episode: int = 1) -> List[Dict[str, Any]]:
+    url = "https://api.knaben.org/v1"
+    results = []
+
+    queries = []
+    if is_series:
+        queries.append(f"{clean_title} S{season:02d}E{episode:02d}")
+    else:
+        if year:
+            queries.append(f"{clean_title} {year}")
+        queries.append(clean_title)
+
+    seen_hashes = set()
+
+    for q in queries:
+        payload = {
+            "query": q,
+            "search_field": "title",
+            "order_by": "seeders",
+            "size": 50
+        }
+        try:
+            resp = requests.post(
+                url,
+                json=payload,
+                headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"},
+                timeout=12
+            )
+            if resp.status_code != 200:
+                continue
+
+            hits = resp.json().get("hits", [])
+            for hit in hits:
+                name = hit.get("title", "")
+                bytes_sz = int(hit.get("bytes", 0))
+                seeds = int(hit.get("seeders", 0))
+
+                # Dapatkan InfoHash daripada magnetUrl atau medan hash
+                magnet = hit.get("magnetUrl", "")
+                raw_hash = hit.get("hash", "")
+                h = ""
+                if raw_hash and len(raw_hash) == 40:
+                    h = raw_hash.lower()
+                elif magnet:
+                    m_match = re.search(r"urn:btih:([a-fA-F0-9]{40})", magnet)
+                    if m_match:
+                        h = m_match.group(1).lower()
+
+                if len(h) != 40 or not name or h in seen_hashes:
+                    continue
+
+                if is_series:
+                    guess = guessit(name)
+                    e_guess = guess.get("episode")
+                    ep_match = False
+                    if isinstance(e_guess, list):
+                        ep_match = episode in e_guess
+                    elif e_guess is not None:
+                        ep_match = (e_guess == episode)
+
+                    if not ep_match:
+                        s_pat = rf"(?i)\b[Ss]0*{season}[\s.\-_]*[Ee]0*{episode}\b"
+                        if not re.search(s_pat, name):
+                            continue
+                else:
+                    if re.search(r"(?i)\b[Ss]\d{1,2}[Ee]\d{1,2}\b", name):
+                        continue
+
+                seen_hashes.add(h)
+                results.append({
+                    "name": name,
+                    "info_hash": h,
+                    "seeders": seeds,
+                    "size": bytes_sz,
+                    "quality": detect_quality(name),
+                    "source": "KnabenAgg",
+                    "file_idx": 0,
+                })
+            if results:
+                break
+        except Exception:
+            continue
+
+    return results
+
+
+# PUNCA 3: Apibay / The Pirate Bay (Carian Berbilang Kata Kunci)
+def scrape_apibay_multi(
+    imdb_id: str,
+    clean_title: str,
+    year: str,
+    is_series: bool,
+    season: int = 1,
+    episode: int = 1,
+) -> List[Dict[str, Any]]:
+    results = []
+    base_id = imdb_id.split(":")[0]
+
+    search_queries = []
+    if is_series:
+        search_queries.append(f"{clean_title} S{season:02d}E{episode:02d}")
+    else:
+        if clean_title and clean_title != base_id:
+            if year:
+                search_queries.append(f"{clean_title} {year}")
+            search_queries.append(clean_title)
+        search_queries.append(base_id)
+
+    seen_hashes = set()
+
+    for q in search_queries:
+        url = f"https://apibay.org/q.php?q={quote_plus(q)}"
+        try:
+            resp = requests.get(
+                url,
+                impersonate="chrome120",
+                timeout=9,
+                headers={"Accept": "application/json", "Referer": "https://thepiratebay.org/"},
+            )
+            if resp.status_code != 200:
+                continue
+
+            data = resp.json()
+            if not (isinstance(data, list) and data and data[0].get("name") != "No results returned"):
+                continue
+
+            for item in data:
+                h = (item.get("info_hash") or "").strip().lower()
+                name = (item.get("name") or "").strip()
+                seeds = int(item.get("seeders", 0))
+                size = int(item.get("size", 0))
+
+                if len(h) != 40 or not name or h in seen_hashes:
+                    continue
+
+                if is_series:
+                    guess = guessit(name)
+                    e_guess = guess.get("episode")
+                    ep_match = False
+                    if isinstance(e_guess, list):
+                        ep_match = episode in e_guess
+                    elif e_guess is not None:
+                        ep_match = (e_guess == episode)
+
+                    if not ep_match:
+                        s_pat = rf"(?i)\b[Ss]0*{season}[\s.\-_]*[Ee]0*{episode}\b"
+                        if not re.search(s_pat, name):
+                            continue
+                else:
+                    if re.search(r"(?i)\b[Ss]\d{1,2}[Ee]\d{1,2}\b", name):
+                        continue
+
+                seen_hashes.add(h)
+                results.append({
+                    "name": name,
+                    "info_hash": h,
+                    "seeders": seeds,
+                    "size": size,
+                    "quality": detect_quality(name),
+                    "source": "Apibay",
+                    "file_idx": 0,
+                })
+        except Exception:
+            continue
+
+    return results
+
+
+# PUNCA 4: YTS Official API (Sandaran Filem Hollywood)
+def scrape_yts(imdb_id: str, clean_title: str, is_series: bool) -> List[Dict[str, Any]]:
+    if is_series:
+        return []
+    base_id = imdb_id.split(":")[0]
+    results = []
+
+    for q in [base_id, clean_title]:
+        if not q:
+            continue
+        url = f"https://yts.mx/api/v2/list_movies.json?query_term={quote_plus(q)}"
+        try:
+            resp = requests.get(url, impersonate="chrome120", timeout=8)
+            if resp.status_code == 200:
+                movies = resp.json().get("data", {}).get("movies", [])
+                if movies:
+                    for m in movies:
+                        m_imdb = m.get("imdb_code", "")
+                        if base_id and m_imdb and m_imdb != base_id:
+                            continue
+                        m_title = m.get("title", "")
+                        m_year = m.get("year", "")
+                        for t in m.get("torrents", []):
+                            h = (t.get("hash") or "").strip().lower()
+                            if len(h) == 40:
+                                q_str = t.get("quality", "HD")
+                                results.append({
+                                    "name": f"{m_title} ({m_year}) [{q_str}] [YTS]",
+                                    "info_hash": h,
+                                    "seeders": int(t.get("seeds", 0)),
+                                    "size": int(t.get("size_bytes", 0)),
+                                    "quality": q_str,
+                                    "source": "YTS",
+                                    "file_idx": 0,
+                                })
+                    if results:
+                        break
+        except Exception:
+            continue
+    return results
+
+
+# ------------------------------------------------------------------------------
+# 5. SALURAN GABUNGAN & PENAPISAN PINTAR
+# ------------------------------------------------------------------------------
+def execute_multisource_pipeline_v2(raw_imdb_id: str, fallback_title: str = "") -> bool:
+    target_id = unquote(raw_imdb_id).strip()
+    is_series = ":" in target_id
+    kind = "SIRI TV" if is_series else "FILEM"
+
+    season = 1
+    episode = 1
+    if is_series:
+        parts = target_id.split(":")
+        base_id = parts[0]
+        season = int(parts[1]) if len(parts) > 1 else 1
+        episode = int(parts[2]) if len(parts) > 2 else 1
+    else:
+        base_id = target_id
+
+    # 1. Dapatkan Metadata Rasmi dari Cinemeta
+    meta = fetch_cinemeta_meta(base_id, is_series)
+    media_title = fallback_title or meta["clean_title"]
+    year = meta.get("year", "")
+
+    # 2. Tetapan Julat Saiz Fail
+    min_bytes = (30 if is_series else 500) * 1024 * 1024
+    max_bytes = 6 * 1024 * 1024 * 1024
+
+    golden_min_bytes = 500 * 1024 * 1024
+    golden_max_bytes = 3 * 1024 * 1024 * 1024
+
+    console.print(Panel.fit(
+        f"[bold cyan]🌟 V3 MULTI-SOURCE TEST ENGINE (V02): {kind}[/bold cyan]\n"
+        f"ID Sasaran: [bold yellow]{target_id}[/bold yellow] | Base IMDb: [bold white]{base_id}[/bold white]\n"
+        f"Tajuk Dikesan: [bold green]{meta['title']}[/bold green] -> Bersih: [bold yellow]{media_title}[/bold yellow] ({year or 'N/A'})\n"
+        f"Julat Saiz: [green]{min_bytes // (1024*1024)} MB[/green] - [red]{max_bytes / (1024**3):.1f} GB[/red]\n"
+        f"Zon Emas Pilihan: [bold magenta]500 MB - 3.0 GB (Seeder Tertinggi Diutamakan)[/bold magenta]"
+        + (f" | Episod: S{season:02d}E{episode:02d}" if is_series else ""),
+        border_style="cyan",
+    ))
+
+    # 3. Panggilan Selari Berbilang Benang (Multi-Threaded)
+    all_raw: List[Dict[str, Any]] = []
+    source_stats: Dict[str, int] = {}
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {
+            executor.submit(scrape_torrentio_turbo, target_id, is_series): "TorrentioTurbo",
+            executor.submit(scrape_knaben_aggregator, media_title, year, is_series, season, episode): "KnabenAgg",
+            executor.submit(scrape_apibay_multi, base_id, media_title, year, is_series, season, episode): "ApibayMulti",
+            executor.submit(scrape_yts, base_id, media_title, is_series): "YTS",
+        }
+
+        for future in as_completed(futures):
+            src_name = futures[future]
+            try:
+                items = future.result() or []
+                source_stats[src_name] = len(items)
+                all_raw.extend(items)
+            except Exception:
+                source_stats[src_name] = 0
+
+    console.print(
+        f"[cyan]📊 Statistik Asal Diperoleh:[/cyan] "
+        + " | ".join([f"[yellow]{k}: {v}[/yellow]" for k, v in source_stats.items()])
+    )
+
+    if not all_raw:
+        console.print(f"[bold red]❌ Tiada torrent ditemui bagi {target_id}![/bold red]")
+        return False
+
+    # 4. Penapisan Saiz & Nyah-duplikasi InfoHash (Kekalkan seeds tertinggi)
+    unique_torrents: Dict[str, Dict[str, Any]] = {}
+    total_rejected = 0
+
+    for item in all_raw:
+        h = item["info_hash"]
+        seeds = item["seeders"]
+        sz = item["size"]
+
+        if seeds < 1:
+            continue
+
+        if sz < min_bytes or sz > max_bytes:
+            total_rejected += 1
+            continue
+
+        if h not in unique_torrents or seeds > unique_torrents[h]["seeders"]:
+            unique_torrents[h] = item
+
+    if not unique_torrents:
+        console.print(
+            f"[bold red]❌ Semua ({len(all_raw)}) torrent di luar julat saiz dibenarkan atau 0 seeds![/bold red]"
+        )
+        return False
+
+    # 5. Susunan Berkeutamaan (Golden Zone 500MB - 3GB Di Atas Sekali)
+    def priority_sort_key(item: Dict[str, Any]):
+        sz = item.get("size", 0)
+        seeds = item.get("seeders", 0)
+        is_golden = (golden_min_bytes <= sz <= golden_max_bytes)
+        return (1 if is_golden else 0, seeds)
+
+    combined_list = list(unique_torrents.values())
+    combined_list.sort(key=priority_sort_key, reverse=True)
+
+    top_torrents = combined_list[:40]
+
+    # 6. Paparan Jadual Keputusan
+    table = Table(
+        title=f"📋 Senarai Seeder Multi-Source V02: {target_id} ({len(top_torrents)} Torrent Lulus / Dihadkan ke 40)",
+        border_style="green",
+    )
+    table.add_column("No", justify="center", style="cyan", width=4)
+    table.add_column("Punca", justify="center", style="yellow", width=14)
+    table.add_column("Kualiti", justify="center", style="magenta", width=8)
+    table.add_column("Saiz", style="white", width=11)
+    table.add_column("Seeds", justify="center", style="green", width=7)
+    table.add_column("Keutamaan", justify="center", style="blue", width=11)
+    table.add_column("Nama Pelepasan / Fail", style="dim")
+
+    for idx, t in enumerate(top_torrents, 1):
+        sz = t["size"]
+        sz_str = f"{sz / (1024**3):.2f} GB" if sz >= 1024**3 else f"{sz / (1024**2):.1f} MB"
+        is_golden = (golden_min_bytes <= sz <= golden_max_bytes)
+        tier_tag = "[bold green]500M-3G ★[/bold green]" if is_golden else "[dim]3G-6G[/dim]"
+
+        table.add_row(
+            str(idx),
+            t["source"],
+            t["quality"],
+            sz_str,
+            str(t["seeders"]),
+            tier_tag,
+            t["name"][:55],
+        )
+
+    console.print(table)
+    console.print(f"[dim]Tolak: {total_rejected} torrent (luar julat) | Unik Lulus: {len(unique_torrents)}[/dim]")
+
+    # 7. Simpan ke Redis V3 (Jika modul disambungkan)
+    if db_v2 and getattr(db_v2, "accounts", None):
+        try:
+            saved = db_v2.save_torrent_list(target_id, top_torrents, ttl_seconds=86400)
+            if saved:
+                console.print(f"[bold green]✅ Berjaya menyimpan {len(top_torrents)} torrent ke Upstash Redis bagi kunci 'stremio:list:{target_id}'![/bold green]")
+                return True
+            else:
+                console.print("[bold red]❌ Gagal menyimpan rekod ke Upstash Redis.[/bold red]")
+        except Exception as e:
+            console.print(f"[bold red]❌ Ralat komunikasi Redis: {e}[/bold red]")
+    else:
+        console.print("[dim yellow]ℹ️ Mod Ujian Tempatan: Melangkau simpanan Redis.[/dim yellow]")
+        return True
+
+    return False
+
+
+def main():
+    parser = argparse.ArgumentParser(description="V3 Multi-Source Seeder Lister Experiment V02")
+    parser.add_argument("--imdb", default="tt0451787", help="Target IMDb ID (Lalai: tt0451787 untuk Kyon Ki...)")
+    parser.add_argument("--title", default="", help="Tajuk sandaran filem/siri")
+    args = parser.parse_args()
+
+    success = execute_multisource_pipeline_v2(args.imdb, args.title)
+    if not success:
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
