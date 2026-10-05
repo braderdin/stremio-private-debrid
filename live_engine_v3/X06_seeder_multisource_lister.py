@@ -7,7 +7,7 @@
 # 1. Menapis fallback_title jika dihantar sebagai IMDb ID (cth: tt0451787).
 # 2. Smart Merge: Menggabungkan senarai X03 dan X06 di Redis tanpa menimpa data.
 # 3. Penapis ketepatan tajuk & penapis anti-spam (elak false positive).
-# 4. Keutamaan Zon Emas (500 MB - 3.0 GB) dihadkan kepada 40 torrent teratas.
+# 4. Keutamaan Zon Emas (500 MB - 3.0 GB) dihadkan kepada 60 torrent teratas.
 # ==============================================================================
 
 import re
@@ -598,14 +598,14 @@ def process_and_save_multisource_list(raw_imdb_id: str, fallback_title: str = ""
     combined_list = list(unique_torrents.values())
     combined_list.sort(key=priority_sort_key, reverse=True)
 
-    top_torrents = combined_list[:40]
+    top_torrents = combined_list[:60]
 
     # 7. Simpan Senarai Lengkap ke Redis Sharded V3 (TTL 24 Jam)
     saved = db_v2.save_torrent_list(target_id, top_torrents, ttl_seconds=86400)
 
     if saved:
         table = Table(
-            title=f"📋 Senarai Seeder Multi-Source Gabungan: {target_id} ({len(top_torrents)} Torrent Lulus / Dihadkan ke 40)",
+            title=f"📋 Senarai Seeder Multi-Source Gabungan: {target_id} ({len(top_torrents)} Torrent Lulus / Dihadkan ke 60)",
             border_style="green",
         )
         table.add_column("No", justify="center", style="cyan", width=4)
