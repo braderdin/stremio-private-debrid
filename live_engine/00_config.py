@@ -42,7 +42,7 @@ RENDER_API_KEY = os.getenv("RENDER_API_KEY", "")
 RENDER_SERVICE_ID = os.getenv("RENDER_SERVICE_ID", "")
 
 # 5. Had Kapasiti & Ambang Selamat (Free-Tier Thresholds)
-B2_MAX_BYTES_PER_ACCOUNT = int(9.5 * 1024 * 1024 * 1024)   # Ambang selamat: 9.5 GB / akaun
+B2_MAX_BYTES_PER_ACCOUNT = int(8.0 * 1024 * 1024 * 1024)   # Ambang selamat: 8.0 GB / akaun
 B2_CEILING_LIMIT_BYTES = int(10.0 * 1024 * 1024 * 1024)    # Had mutlak percuma: 10.0 GB / akaun
 UPSTASH_MAX_FREE_DAILY_COMMANDS = 10000                     # Had panggilan Upstash harian
 UPSTASH_MAX_MEMORY_BYTES = 256 * 1024 * 1024               # Had RAM: 256 MB / akaun
