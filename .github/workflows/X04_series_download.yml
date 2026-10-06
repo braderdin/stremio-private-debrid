@@ -64,6 +64,15 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements-runner.txt
 
+      - name: 6b. Pra-Pemeriksaan & Pengosongan Storan B2 (X07 Storage Guard)
+        env:
+          REDIS_ACCOUNTS_JSON: ${{ secrets.REDIS_ACCOUNTS_JSON }}
+          B2_ACCOUNTS_JSON: ${{ secrets.B2_ACCOUNTS_JSON }}
+        run: |
+          python live_engine_v3/X07_b2_storage_guard.py \
+            --min-free-gb 5.0 \
+            --safe-cap-gb 8.0
+
       - name: 7. Laksanakan Enjin Runner X04
         env:
           REDIS_ACCOUNTS_JSON: ${{ secrets.REDIS_ACCOUNTS_JSON }}
