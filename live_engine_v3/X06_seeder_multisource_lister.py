@@ -583,9 +583,9 @@ def process_and_save_multisource_list(raw_imdb_id: str, fallback_title: str = ""
             valid_x03[h] = item
 
     sorted_x03 = sorted(valid_x03.values(), key=priority_sort_key, reverse=True)
-    # Kekalkan maksimum 30 senarai seeder terbanyak dari X03
-    x03_selected = sorted_x03[:30]
-    console.print(f"[dim green]📥 Diambil {len(x03_selected)} torrent sah (>= 4 seeds) dari X03 (Had Asal 30).[/dim green]")
+    # Kekalkan maksimum 40 senarai seeder terbanyak dari X03
+    x03_selected = sorted_x03[:40]
+    console.print(f"[dim green]📥 Diambil {len(x03_selected)} torrent sah (>= 4 seeds) dari X03 (Had Asal 40).[/dim green]")
 
     # 6. Tapis & Nyah-duplikasi Senarai X06 Baharu
     valid_x06: Dict[str, Dict[str, Any]] = {}
