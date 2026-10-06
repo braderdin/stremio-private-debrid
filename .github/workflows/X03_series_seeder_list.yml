@@ -23,22 +23,27 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - name: 1. Checkout Repositori
-        uses: actions/checkout@v4
+      - name: 1. Nyahsekat DNS Runner (Guna Cloudflare 1.1.1.1 & Google 8.8.8.8)
+        run: |
+          sudo sed -i '1inameserver 1.1.1.1\nnameserver 8.8.8.8' /etc/resolv.conf
+          head -n 4 /etc/resolv.conf
 
-      - name: 2. Pasang Persekitaran Python 3.11
-        uses: actions/setup-python@v4
+      - name: 2. Checkout Repositori
+        uses: actions/checkout@v7
+
+      - name: 3. Pasang Persekitaran Python 3.11
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: "pip"
 
-      - name: 3. Pasang Keperluan Pustaka Python
+      - name: 4. Pasang Keperluan Pustaka Python
         run: |
           pip install --upgrade pip
           pip install -r requirements-runner.txt
           pip install guessit
 
-      - name: 4. Picu Pengikis Sarikata di Repo Subtitle (Async)
+      - name: 5. Picu Pengikis Sarikata di Repo Subtitle (Async)
         continue-on-error: true
         run: |
           curl -X POST \
@@ -47,7 +52,7 @@ jobs:
             https://api.github.com/repos/braderdin/stremio-sub-addon/dispatches \
             -d '{"event_type":"ondemand_scrape","client_payload":{"imdb_id":"${{ inputs.imdb_id }}"}}'
 
-      - name: 5. Laksanakan Enjin X03_series_seeder_lister.py
+      - name: 6. Laksanakan Enjin X03_series_seeder_lister.py
         env:
           REDIS_ACCOUNTS_JSON: ${{ secrets.REDIS_ACCOUNTS_JSON }}
         run: |
@@ -55,7 +60,16 @@ jobs:
             --imdb "${{ inputs.imdb_id }}" \
             --title "${{ inputs.title }}"
 
-      - name: 6. Hantar Notifikasi Senarai Seeder ke Telegram
+      - name: 7. Laksanakan Enjin Tambahan X06_seeder_multisource_lister.py (Multi-Source)
+        continue-on-error: true
+        env:
+          REDIS_ACCOUNTS_JSON: ${{ secrets.REDIS_ACCOUNTS_JSON }}
+        run: |
+          python live_engine_v3/X06_seeder_multisource_lister.py \
+            --imdb "${{ inputs.imdb_id }}" \
+            --title "${{ inputs.title }}"
+
+      - name: 8. Hantar Notifikasi Senarai Seeder ke Telegram
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -66,7 +80,7 @@ jobs:
             --imdb "${{ inputs.imdb_id }}" \
             --title "${{ inputs.title }}"
 
-      - name: 7. Hantar Notifikasi Ralat ke Telegram
+      - name: 9. Hantar Notifikasi Ralat ke Telegram
         if: failure()
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
