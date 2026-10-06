@@ -3,14 +3,14 @@
 # PROJEK: STREMIO PRIVATE DEBRID V3 - MULTI-SOURCE SEEDER LISTER (ENGINE SEBENAR)
 # LOKASI: /home/braderdin/stremio-private-debrid/live_engine_v3/X06_seeder_multisource_lister.py
 #
-# PEMBAIKAN TERKINI:
-# 1. Tapis Seeder Minimum: Wajib >= 4 Seeds (Singkirkan seeder hantu 1-3 seeds).
-# 2. Zon Emas Baharu: 1.0 GB - 4.5 GB disusun di atas mengikut Seeder tertinggi.
-# 3. Had Saiz Siling Fail: Dinaikkan sehingga 7.5 GB.
-# 4. Kuota Gabungan Pintar (Limit 60):
-#    - Kekalkan 30 terbaik dari X03.
-#    - Tambah sehingga 30 terbaik dari X06 (atau isi baki sehingga genap 60 jika X03 < 30).
-# 5. Smart Merge & Title Sanity Filter (Sekat XXX, spam pelepasan palsu).
+# PEMBAIKAN & CIRI TERKINI:
+# 1. 6 Punca Pengikis: Torrentio Turbo, TorrentsDB, Knaben, Apibay, YTS, EZTV.
+# 2. Penapis Seeder Pintar: Wajib >= 2 Seeds (Seeder 1 disingkirkan sebagai seeder hantu).
+# 3. Zon Emas Keutamaan: 1.0 GB - 4.5 GB disusun di atas mengikut Seeder tertinggi.
+# 4. Had Siling Saiz Fail: Ditingkatkan sehingga 8.5 GB (selaras dengan X03).
+# 5. Perlindungan Variasi X03: Entri X03 (Apibay/Torrentio) dikekalkan tanpa ditindih,
+#    manakala TorrentsDB dan punca lain mengisi baki kuota sehingga 60 entri.
+# 6. Smart Merge & Title Sanity Filter (Sekat XXX, spam pelepasan palsu).
 # ==============================================================================
 
 import re
@@ -221,7 +221,24 @@ def scrape_torrentio_turbo(target_id: str, is_series: bool) -> List[Dict[str, An
     return results
 
 
-# PUNCA 2: Knaben Aggregator API (1337x, TGx, TPB, Rutracker, BitSearch, LimeTorrents)
+# PUNCA 2: TorrentsDB Addon (Menyokong 1TamilBlasters, TPB, YTS, dll)
+def scrape_torrentsdb(target_id: str, is_series: bool) -> List[Dict[str, Any]]:
+    ep_type = "series" if is_series else "movie"
+    url = f"https://torrentsdb.com/stream/{ep_type}/{target_id}.json"
+    results = []
+    try:
+        resp = requests.get(url, impersonate="chrome120", timeout=10)
+        if resp.status_code == 200:
+            for s in resp.json().get("streams", []):
+                p = parse_generic_stremio_stream(s, default_source="TorrentsDB")
+                if p:
+                    results.append(p)
+    except Exception:
+        pass
+    return results
+
+
+# PUNCA 3: Knaben Aggregator API (1337x, TGx, TPB, Rutracker, BitSearch, LimeTorrents)
 def scrape_knaben_aggregator(
     clean_title: str,
     year: str,
@@ -315,7 +332,7 @@ def scrape_knaben_aggregator(
     return results
 
 
-# PUNCA 3: Apibay / The Pirate Bay (Carian Berbilang Kata Kunci)
+# PUNCA 4: Apibay / The Pirate Bay (Carian Berbilang Kata Kunci)
 def scrape_apibay_multi(
     imdb_id: str,
     clean_title: str,
@@ -399,16 +416,19 @@ def scrape_apibay_multi(
     return results
 
 
-# PUNCA 4: YTS Official REST API (Filem Sahaja)
+# PUNCA 5: YTS Official REST API (Filem Sahaja)
 def scrape_yts(imdb_id: str, clean_title: str, is_series: bool) -> List[Dict[str, Any]]:
     if is_series:
         return []
     base_id = imdb_id.split(":")[0]
     results = []
 
-    for q in [base_id, clean_title]:
-        if not q or re.match(r"^tt\d+$", q):
-            continue
+    # Cari terus menggunakan ID IMDb (sokongan penuh) serta tajuk bersih
+    search_terms = [base_id]
+    if clean_title and clean_title != base_id:
+        search_terms.append(clean_title)
+
+    for q in search_terms:
         url = f"https://yts.mx/api/v2/list_movies.json?query_term={quote_plus(q)}"
         try:
             resp = requests.get(url, impersonate="chrome120", timeout=8)
@@ -442,7 +462,7 @@ def scrape_yts(imdb_id: str, clean_title: str, is_series: bool) -> List[Dict[str
     return results
 
 
-# PUNCA 5: EZTV REST API (Siri TV Sahaja)
+# PUNCA 6: EZTV REST API (Siri TV Sahaja)
 def scrape_eztv(imdb_id: str, is_series: bool, season: int = 1, episode: int = 1) -> List[Dict[str, Any]]:
     if not is_series:
         return []
@@ -513,30 +533,31 @@ def process_and_save_multisource_list(raw_imdb_id: str, fallback_title: str = ""
     year = meta.get("year", "")
 
     # 2. Tetapan Had Saiz & Had Seeder Baharu
-    min_bytes = (30 if is_series else 500) * 1024 * 1024
-    max_bytes = int(7.5 * 1024 * 1024 * 1024)           # Had siling: 7.5 GB
+    min_bytes = (30 if is_series else 400) * 1024 * 1024
+    max_bytes = int(8.5 * 1024 * 1024 * 1024)           # Had siling: 8.5 GB (selaras dengan X03)
     golden_min_bytes = int(1.0 * 1024 * 1024 * 1024)    # Zon Emas: 1.0 GB
     golden_max_bytes = int(4.5 * 1024 * 1024 * 1024)    # Zon Emas: 4.5 GB
-    min_seeds = 4                                       # Tapis: Wajib >= 4 Seeds
+    min_seeds = 2                                       # Tapis Seeder: Wajib >= 2 Seeds (buang seed 1)
 
     console.print(Panel.fit(
         f"[bold cyan]🚀 V3 MULTI-SOURCE SEEDER ENGINE (X06 - KUOTA 60): {kind}[/bold cyan]\n"
         f"ID Sasaran: [bold yellow]{target_id}[/bold yellow] | Base IMDb: [bold white]{base_id}[/bold white]\n"
         f"Tajuk Cinemeta: [bold green]{meta['title']}[/bold green] -> Bersih: [yellow]{media_title}[/yellow] ({year or 'N/A'})\n"
-        f"Julat Saiz Dibenarkan: [green]{min_bytes // (1024*1024)} MB[/green] - [red]7.5 GB[/red]\n"
+        f"Julat Saiz Dibenarkan: [green]{min_bytes // (1024*1024)} MB[/green] - [red]8.5 GB[/red]\n"
         f"Zon Emas Pilihan: [bold magenta]1.0 GB - 4.5 GB (Seeder Tertinggi Diutamakan)[/bold magenta]\n"
-        f"Penapis Seeder Minimum: [bold red]>= 4 Seeds Sahaja[/bold red]"
+        f"Penapis Seeder: [bold red]>= 2 Seeds Sahaja (Seed 1 Disingkirkan)[/bold red]"
         + (f" | Episod: S{season:02d}E{episode:02d}" if is_series else ""),
         border_style="cyan",
     ))
 
-    # 3. Panggilan Pengikis X06 Selari (Multi-Threaded)
+    # 3. Panggilan Pengikis X06 Selari (6 Thread Workers)
     all_raw_x06: List[Dict[str, Any]] = []
     source_stats: Dict[str, int] = {}
 
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    with ThreadPoolExecutor(max_workers=6) as executor:
         futures = {
             executor.submit(scrape_torrentio_turbo, target_id, is_series): "TorrentioTurbo",
+            executor.submit(scrape_torrentsdb, target_id, is_series): "TorrentsDB",
             executor.submit(scrape_knaben_aggregator, media_title, year, is_series, season, episode): "KnabenAgg",
             executor.submit(scrape_apibay_multi, base_id, media_title, year, is_series, season, episode): "ApibayMulti",
             executor.submit(scrape_yts, base_id, media_title, is_series): "YTS",
@@ -567,7 +588,7 @@ def process_and_save_multisource_list(raw_imdb_id: str, fallback_title: str = ""
         is_golden = (golden_min_bytes <= sz <= golden_max_bytes)
         return (1 if is_golden else 0, seeds)
 
-    # 5. Tapis Senarai Asal X03 (Wajib seeds >= 4 dan saiz <= 7.5GB)
+    # 5. Tapis Senarai Asal X03 (Wajib seeds >= 2 dan saiz <= 8.5GB)
     valid_x03: Dict[str, Dict[str, Any]] = {}
     for item in raw_x03:
         h = item.get("info_hash", "").lower().strip()
@@ -583,9 +604,9 @@ def process_and_save_multisource_list(raw_imdb_id: str, fallback_title: str = ""
             valid_x03[h] = item
 
     sorted_x03 = sorted(valid_x03.values(), key=priority_sort_key, reverse=True)
-    # Kekalkan maksimum 40 senarai seeder terbanyak dari X03
+    # Kekalkan sehingga 40 senarai terbaik daripada X03
     x03_selected = sorted_x03[:40]
-    console.print(f"[dim green]📥 Diambil {len(x03_selected)} torrent sah (>= 4 seeds) dari X03 (Had Asal 40).[/dim green]")
+    console.print(f"[dim green]📥 Diambil {len(x03_selected)} torrent sah (>= 2 seeds) dari X03.[/dim green]")
 
     # 6. Tapis & Nyah-duplikasi Senarai X06 Baharu
     valid_x06: Dict[str, Dict[str, Any]] = {}
@@ -604,20 +625,11 @@ def process_and_save_multisource_list(raw_imdb_id: str, fallback_title: str = ""
 
     sorted_x06 = sorted(valid_x06.values(), key=priority_sort_key, reverse=True)
 
-    # 7. Penggabungan Berkuota (Smart Quota Merge ke Limit 60)
-    x03_map = {it["info_hash"]: it for it in x03_selected}
+    # 7. Penggabungan Berkuota Pintar (Kekalkan Rilis Asal X03 & Tambah Sumber Baharu)
+    # Rilis X03 dikekalkan tanpa ditindih supaya pilihan Apibay / Torrentio asal kekal
+    seen_hashes = {it["info_hash"] for it in x03_selected}
+    remaining_slots = max(0, 60 - len(x03_selected))
 
-    # Jika X06 mempunyai rekod hash sama dengan seeder lebih tinggi, kemas kini rekod X03
-    for it in sorted_x06:
-        h = it["info_hash"]
-        if h in x03_map and it["seeders"] > x03_map[h]["seeders"]:
-            x03_map[h] = it
-
-    final_x03_list = list(x03_map.values())
-    seen_hashes = set(x03_map.keys())
-
-    # Kira baki kekosongan untuk diisi oleh X06 sehingga had maksimum 60
-    remaining_slots = max(0, 60 - len(final_x03_list))
     x06_added = []
     for it in sorted_x06:
         h = it["info_hash"]
@@ -627,16 +639,16 @@ def process_and_save_multisource_list(raw_imdb_id: str, fallback_title: str = ""
             if len(x06_added) >= remaining_slots:
                 break
 
-    console.print(f"[dim cyan]➕ X06 menambah {len(x06_added)} torrent baharu (Baki kuota: {remaining_slots}).[/dim cyan]")
+    console.print(f"[dim cyan]➕ X06 menambah {len(x06_added)} torrent unik baharu (Kekosongan kuota: {remaining_slots}).[/dim cyan]")
 
-    combined_list = final_x03_list + x06_added
+    combined_list = x03_selected + x06_added
     combined_list.sort(key=priority_sort_key, reverse=True)
 
     # Hadkan kepada 60 torrent teratas
     top_torrents = combined_list[:60]
 
     if not top_torrents:
-        console.print(f"[bold red]❌ Tiada torrent melepasi tapisan (tiada torrent dengan >= 4 seeds atau dalam had 7.5 GB)![/bold red]")
+        console.print(f"[bold red]❌ Tiada torrent melepasi tapisan (tiada torrent dengan >= 2 seeds atau dalam had 8.5 GB)![/bold red]")
         return False
 
     # 8. Simpan Senarai Lengkap ke Redis Sharded V3 (TTL 24 Jam)
@@ -648,7 +660,7 @@ def process_and_save_multisource_list(raw_imdb_id: str, fallback_title: str = ""
             border_style="green",
         )
         table.add_column("No", justify="center", style="cyan", width=4)
-        table.add_column("Punca", justify="center", style="yellow", width=14)
+        table.add_column("Punca", justify="center", style="yellow", width=16)
         table.add_column("Kualiti", justify="center", style="magenta", width=8)
         table.add_column("Saiz", style="white", width=11)
         table.add_column("Seeds", justify="center", style="green", width=7)
@@ -672,7 +684,7 @@ def process_and_save_multisource_list(raw_imdb_id: str, fallback_title: str = ""
             )
 
         console.print(table)
-        console.print(f"[bold green]✅ Berjaya menggabungkan dan menyimpan {len(top_torrents)} torrent (semua >= 4 seeds) ke Upstash Redis bagi kunci 'stremio:list:{target_id}'![/bold green]")
+        console.print(f"[bold green]✅ Berjaya menggabungkan dan menyimpan {len(top_torrents)} torrent (semua >= 2 seeds) ke Upstash Redis bagi kunci 'stremio:list:{target_id}'![/bold green]")
         return True
 
     console.print("[bold red]❌ Gagal mengemas kini data ke Upstash Redis![/bold red]")
