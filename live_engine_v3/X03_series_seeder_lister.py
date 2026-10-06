@@ -290,10 +290,10 @@ def process_and_save_seeder_list(raw_imdb_id: str, fallback_title: str = "") -> 
         console.print(f"[bold red]❌ Semua torrent ditolak (melebihi {max_bytes / (1024**3):.1f} GB atau di bawah {min_bytes // (1024*1024)} MB)![/bold red]")
         return False
 
-    # 4. Susun mengikut Seeds Terbanyak (Ambil 35 teratas)
+    # 4. Susun mengikut Seeds Terbanyak (Ambil 60 teratas)
     combined_list = list(unique_torrents.values())
     combined_list.sort(key=lambda x: x["seeders"], reverse=True)
-    top_torrents = combined_list[:35]
+    top_torrents = combined_list[:60]
 
     # 5. Simpan ke Redis V3 (Kunci: stremio:list:{target_id}, TTL: 24 Jam)
     saved = db_v2.save_torrent_list(target_id, top_torrents, ttl_seconds=86400)

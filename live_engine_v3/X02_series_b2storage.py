@@ -33,7 +33,7 @@ for p in [CURRENT_DIR, LIVE_ENGINE_DIR]:
 try:
     _config = importlib.import_module("00_config")
     B2_ACCOUNTS = getattr(_config, "B2_ACCOUNTS", [])
-    B2_MAX_BYTES = getattr(_config, "B2_MAX_BYTES_PER_ACCOUNT", int(9.5 * 1024 * 1024 * 1024))
+    B2_MAX_BYTES = getattr(_config, "B2_MAX_BYTES_PER_ACCOUNT", int(8.0 * 1024 * 1024 * 1024))
     CF_B2_PROXY = getattr(
         _config,
         "CF_WORKER_B2_PROXY_STORAGE",
