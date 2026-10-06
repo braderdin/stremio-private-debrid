@@ -3,11 +3,14 @@
 # PROJEK: STREMIO PRIVATE DEBRID V3 - MULTI-SOURCE SEEDER LISTER (ENGINE SEBENAR)
 # LOKASI: /home/braderdin/stremio-private-debrid/live_engine_v3/X06_seeder_multisource_lister.py
 #
-# PEMBAIKAN:
-# 1. Menapis fallback_title jika dihantar sebagai IMDb ID (cth: tt0451787).
-# 2. Smart Merge: Menggabungkan senarai X03 dan X06 di Redis tanpa menimpa data.
-# 3. Penapis ketepatan tajuk & penapis anti-spam (elak false positive).
-# 4. Keutamaan Zon Emas (500 MB - 3.0 GB) dihadkan kepada 60 torrent teratas.
+# PEMBAIKAN TERKINI:
+# 1. Tapis Seeder Minimum: Wajib >= 4 Seeds (Singkirkan seeder hantu 1-3 seeds).
+# 2. Zon Emas Baharu: 1.0 GB - 4.5 GB disusun di atas mengikut Seeder tertinggi.
+# 3. Had Saiz Siling Fail: Dinaikkan sehingga 7.5 GB.
+# 4. Kuota Gabungan Pintar (Limit 60):
+#    - Kekalkan 30 terbaik dari X03.
+#    - Tambah sehingga 30 terbaik dari X06 (atau isi baki sehingga genap 60 jika X03 < 30).
+# 5. Smart Merge & Title Sanity Filter (Sekat XXX, spam pelepasan palsu).
 # ==============================================================================
 
 import re
@@ -167,7 +170,7 @@ def parse_generic_stremio_stream(stream: Dict[str, Any], default_source: str = "
             elif "KB" in unit:
                 size_bytes = int(val * 1024)
 
-        if any(icon in line for icon in ["⚙️", "🌐", "🏷️️"]):
+        if any(icon in line for icon in ["⚙️", "🌐", "🏷"]):
             src_m = re.search(r"[⚙🌐🏷️]\s*([\w\+\.\-]+)", line)
             if src_m:
                 source_site = src_m.group(1)
@@ -478,7 +481,7 @@ def scrape_eztv(imdb_id: str, is_series: bool, season: int = 1, episode: int = 1
 
 
 # ------------------------------------------------------------------------------
-# 5. ENJIN UTAMA: PENGURUSAN DATA & SMART MERGE KE REDIS
+# 5. ENJIN UTAMA: PENGURUSAN DATA & SMART MERGE KUOTA KE REDIS
 # ------------------------------------------------------------------------------
 def process_and_save_multisource_list(raw_imdb_id: str, fallback_title: str = "") -> bool:
     target_id = unquote(raw_imdb_id).strip()
@@ -498,12 +501,10 @@ def process_and_save_multisource_list(raw_imdb_id: str, fallback_title: str = ""
     # 1. Ambil Metadata Cinemeta & Tapis IMDb ID daripada fallback_title
     meta = fetch_cinemeta_meta(base_id, is_series)
 
-    # Sekiranya fallback_title ialah IMDb ID (cth: tt0451787), kosongkan semula
     clean_fallback = fallback_title.strip()
     if clean_fallback and re.match(r"^tt\d+", clean_fallback):
         clean_fallback = ""
 
-    # Utamakan tajuk Cinemeta jika sah
     if meta.get("clean_title") and not re.match(r"^tt\d+", meta["clean_title"]):
         media_title = meta["clean_title"]
     else:
@@ -511,25 +512,26 @@ def process_and_save_multisource_list(raw_imdb_id: str, fallback_title: str = ""
 
     year = meta.get("year", "")
 
-    # 2. Had Siling Saiz Dibenarkan
+    # 2. Tetapan Had Saiz & Had Seeder Baharu
     min_bytes = (30 if is_series else 500) * 1024 * 1024
-    max_bytes = 6 * 1024 * 1024 * 1024
-
-    golden_min_bytes = 500 * 1024 * 1024
-    golden_max_bytes = 3 * 1024 * 1024 * 1024
+    max_bytes = int(7.5 * 1024 * 1024 * 1024)           # Had siling: 7.5 GB
+    golden_min_bytes = int(1.0 * 1024 * 1024 * 1024)    # Zon Emas: 1.0 GB
+    golden_max_bytes = int(4.5 * 1024 * 1024 * 1024)    # Zon Emas: 4.5 GB
+    min_seeds = 4                                       # Tapis: Wajib >= 4 Seeds
 
     console.print(Panel.fit(
-        f"[bold cyan]🚀 V3 MULTI-SOURCE SEEDER ENGINE (X06): {kind}[/bold cyan]\n"
+        f"[bold cyan]🚀 V3 MULTI-SOURCE SEEDER ENGINE (X06 - KUOTA 60): {kind}[/bold cyan]\n"
         f"ID Sasaran: [bold yellow]{target_id}[/bold yellow] | Base IMDb: [bold white]{base_id}[/bold white]\n"
         f"Tajuk Cinemeta: [bold green]{meta['title']}[/bold green] -> Bersih: [yellow]{media_title}[/yellow] ({year or 'N/A'})\n"
-        f"Julat Saiz Dibenarkan: [green]{min_bytes // (1024*1024)} MB[/green] - [red]{max_bytes / (1024**3):.1f} GB[/red]\n"
-        f"Keutamaan Emas: [bold magenta]500 MB - 3.0 GB (Seeder Tertinggi Diutamakan)[/bold magenta]"
+        f"Julat Saiz Dibenarkan: [green]{min_bytes // (1024*1024)} MB[/green] - [red]7.5 GB[/red]\n"
+        f"Zon Emas Pilihan: [bold magenta]1.0 GB - 4.5 GB (Seeder Tertinggi Diutamakan)[/bold magenta]\n"
+        f"Penapis Seeder Minimum: [bold red]>= 4 Seeds Sahaja[/bold red]"
         + (f" | Episod: S{season:02d}E{episode:02d}" if is_series else ""),
         border_style="cyan",
     ))
 
-    # 3. Panggilan Pengikis Selari (Multi-Threaded)
-    all_raw: List[Dict[str, Any]] = []
+    # 3. Panggilan Pengikis X06 Selari (Multi-Threaded)
+    all_raw_x06: List[Dict[str, Any]] = []
     source_stats: Dict[str, int] = {}
 
     with ThreadPoolExecutor(max_workers=5) as executor:
@@ -546,61 +548,98 @@ def process_and_save_multisource_list(raw_imdb_id: str, fallback_title: str = ""
             try:
                 items = future.result() or []
                 source_stats[src_name] = len(items)
-                all_raw.extend(items)
+                all_raw_x06.extend(items)
             except Exception:
                 source_stats[src_name] = 0
 
     console.print(
-        f"[cyan]📊 Statistik Asal Diperoleh:[/cyan] "
+        f"[cyan]📊 Statistik Asal X06 Diperoleh:[/cyan] "
         + " | ".join([f"[yellow]{k}: {v}[/yellow]" for k, v in source_stats.items()])
     )
 
-    # 4. SMART MERGE: Baca senarai sedia ada di Redis (cth: daripada X03)
-    existing_redis_list = db_v2.get_torrent_list(target_id) or []
-    if existing_redis_list:
-        console.print(f"[dim green]📥 Ditemui {len(existing_redis_list)} rekod sedia ada dari Redis. Memulakan Smart Merge...[/dim green]")
-        all_raw.extend(existing_redis_list)
+    # 4. Ambil Senarai Sedia Ada daripada X03 di Redis
+    raw_x03 = db_v2.get_torrent_list(target_id) or []
 
-    if not all_raw:
-        console.print(f"[bold red]❌ Tiada torrent ditemui dari sebarang punca untuk {target_id}![/bold red]")
-        return False
-
-    # 5. Penapisan Saiz & Nyah-duplikasi InfoHash (Kekalkan Seeds Tertinggi)
-    unique_torrents: Dict[str, Dict[str, Any]] = {}
-    total_rejected = 0
-
-    for item in all_raw:
-        h = item.get("info_hash", "").lower().strip()
-        seeds = int(item.get("seeders", 0))
-        sz = int(item.get("size", 0))
-
-        if len(h) != 40 or seeds < 1:
-            continue
-
-        if sz < min_bytes or sz > max_bytes:
-            total_rejected += 1
-            continue
-
-        if h not in unique_torrents or seeds > unique_torrents[h]["seeders"]:
-            unique_torrents[h] = item
-
-    if not unique_torrents:
-        console.print(f"[bold red]❌ Semua ({len(all_raw)}) torrent ditolak mengikut julat saiz atau 0 seeder![/bold red]")
-        return False
-
-    # 6. Pengisihan Berkeutamaan (Golden Zone 500 MB - 3.0 GB Di Atas Sekali)
+    # Fungsi Pengisihan Keutamaan: Zon Emas (1.0GB - 4.5GB) dahulu, kemudian bilangan Seeds
     def priority_sort_key(item: Dict[str, Any]):
         sz = item.get("size", 0)
         seeds = item.get("seeders", 0)
         is_golden = (golden_min_bytes <= sz <= golden_max_bytes)
         return (1 if is_golden else 0, seeds)
 
-    combined_list = list(unique_torrents.values())
+    # 5. Tapis Senarai Asal X03 (Wajib seeds >= 4 dan saiz <= 7.5GB)
+    valid_x03: Dict[str, Dict[str, Any]] = {}
+    for item in raw_x03:
+        h = item.get("info_hash", "").lower().strip()
+        seeds = int(item.get("seeders", 0))
+        sz = int(item.get("size", 0))
+
+        if len(h) != 40 or seeds < min_seeds:
+            continue
+        if sz < min_bytes or sz > max_bytes:
+            continue
+
+        if h not in valid_x03 or seeds > valid_x03[h]["seeders"]:
+            valid_x03[h] = item
+
+    sorted_x03 = sorted(valid_x03.values(), key=priority_sort_key, reverse=True)
+    # Kekalkan maksimum 30 senarai seeder terbanyak dari X03
+    x03_selected = sorted_x03[:30]
+    console.print(f"[dim green]📥 Diambil {len(x03_selected)} torrent sah (>= 4 seeds) dari X03 (Had Asal 30).[/dim green]")
+
+    # 6. Tapis & Nyah-duplikasi Senarai X06 Baharu
+    valid_x06: Dict[str, Dict[str, Any]] = {}
+    for item in all_raw_x06:
+        h = item.get("info_hash", "").lower().strip()
+        seeds = int(item.get("seeders", 0))
+        sz = int(item.get("size", 0))
+
+        if len(h) != 40 or seeds < min_seeds:
+            continue
+        if sz < min_bytes or sz > max_bytes:
+            continue
+
+        if h not in valid_x06 or seeds > valid_x06[h]["seeders"]:
+            valid_x06[h] = item
+
+    sorted_x06 = sorted(valid_x06.values(), key=priority_sort_key, reverse=True)
+
+    # 7. Penggabungan Berkuota (Smart Quota Merge ke Limit 60)
+    x03_map = {it["info_hash"]: it for it in x03_selected}
+
+    # Jika X06 mempunyai rekod hash sama dengan seeder lebih tinggi, kemas kini rekod X03
+    for it in sorted_x06:
+        h = it["info_hash"]
+        if h in x03_map and it["seeders"] > x03_map[h]["seeders"]:
+            x03_map[h] = it
+
+    final_x03_list = list(x03_map.values())
+    seen_hashes = set(x03_map.keys())
+
+    # Kira baki kekosongan untuk diisi oleh X06 sehingga had maksimum 60
+    remaining_slots = max(0, 60 - len(final_x03_list))
+    x06_added = []
+    for it in sorted_x06:
+        h = it["info_hash"]
+        if h not in seen_hashes:
+            x06_added.append(it)
+            seen_hashes.add(h)
+            if len(x06_added) >= remaining_slots:
+                break
+
+    console.print(f"[dim cyan]➕ X06 menambah {len(x06_added)} torrent baharu (Baki kuota: {remaining_slots}).[/dim cyan]")
+
+    combined_list = final_x03_list + x06_added
     combined_list.sort(key=priority_sort_key, reverse=True)
 
+    # Hadkan kepada 60 torrent teratas
     top_torrents = combined_list[:60]
 
-    # 7. Simpan Senarai Lengkap ke Redis Sharded V3 (TTL 24 Jam)
+    if not top_torrents:
+        console.print(f"[bold red]❌ Tiada torrent melepasi tapisan (tiada torrent dengan >= 4 seeds atau dalam had 7.5 GB)![/bold red]")
+        return False
+
+    # 8. Simpan Senarai Lengkap ke Redis Sharded V3 (TTL 24 Jam)
     saved = db_v2.save_torrent_list(target_id, top_torrents, ttl_seconds=86400)
 
     if saved:
@@ -613,14 +652,14 @@ def process_and_save_multisource_list(raw_imdb_id: str, fallback_title: str = ""
         table.add_column("Kualiti", justify="center", style="magenta", width=8)
         table.add_column("Saiz", style="white", width=11)
         table.add_column("Seeds", justify="center", style="green", width=7)
-        table.add_column("Keutamaan", justify="center", style="blue", width=11)
+        table.add_column("Keutamaan", justify="center", style="blue", width=14)
         table.add_column("Nama Pelepasan / Fail", style="dim")
 
         for idx, t in enumerate(top_torrents, 1):
             sz = t["size"]
             sz_str = f"{sz / (1024**3):.2f} GB" if sz >= 1024**3 else f"{sz / (1024**2):.1f} MB"
             is_golden = (golden_min_bytes <= sz <= golden_max_bytes)
-            tier_tag = "[bold green]500M-3G ★[/bold green]" if is_golden else "[dim]3G-6G[/dim]"
+            tier_tag = "[bold green]1.0G-4.5G ★[/bold green]" if is_golden else "[dim]Lain-lain[/dim]"
 
             table.add_row(
                 str(idx),
@@ -633,8 +672,7 @@ def process_and_save_multisource_list(raw_imdb_id: str, fallback_title: str = ""
             )
 
         console.print(table)
-        console.print(f"[dim]Tolak: {total_rejected} (luar saiz) | Bersih Unik Gabungan: {len(unique_torrents)}[/dim]")
-        console.print(f"[bold green]✅ Berjaya menggabungkan dan menyimpan senarai seeder ke Upstash Redis Shard bagi kunci 'stremio:list:{target_id}'![/bold green]")
+        console.print(f"[bold green]✅ Berjaya menggabungkan dan menyimpan {len(top_torrents)} torrent (semua >= 4 seeds) ke Upstash Redis bagi kunci 'stremio:list:{target_id}'![/bold green]")
         return True
 
     console.print("[bold red]❌ Gagal mengemas kini data ke Upstash Redis![/bold red]")
