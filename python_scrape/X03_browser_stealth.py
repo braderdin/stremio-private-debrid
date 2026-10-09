@@ -83,7 +83,7 @@ def smart_human_type(locator: Locator, page: Page, text: str):
 
 
 def resolve_cloudflare_turnstile(page: Page, max_retries: int = 20):
-    """Pemeriksaan dan klik cabaran Cloudflare Turnstile (daripada kod asal B2)."""
+    """Pemeriksaan dan klik cabaran Cloudflare Turnstile."""
     for _ in range(max_retries):
         page.wait_for_timeout(1000)
         try:
@@ -119,7 +119,6 @@ def find_search_input(page: Page, timeout_sec: int = 40) -> Optional[Locator]:
 
     start_time = time.time()
     while time.time() - start_time < timeout_sec:
-        # Periksa Turnstile jika halaman masih disekat
         resolve_cloudflare_turnstile(page, max_retries=1)
 
         for frame in [page] + page.frames:
@@ -385,7 +384,7 @@ def activate_hydrax_and_open_popup(page: Page) -> Page:
 
 @contextmanager
 def launch_camoufox_session():
-    """Melancarkan pelayar Camoufox secara selamat dan bersih."""
+    """Melancarkan pelayar Camoufox dengan pembersihan automatik."""
     is_headless = cfg.BROWSER_HEADLESS
     status_txt = "Latar Belakang (Headless)" if is_headless else "Paparan Visual (GUI Terbuka)"
     console.print(f"[cyan]🚀 Melancarkan Pelayar Camoufox: [bold green]{status_txt}[/bold green]...[/cyan]")
@@ -393,14 +392,7 @@ def launch_camoufox_session():
     with Camoufox(headless=is_headless, geoip=True) as browser:
         context = browser.new_context(viewport={"width": 1366, "height": 768})
         page = context.new_page()
-        try:
-            yield browser, context, page
-        finally:
-            for item in (page, context):
-                try:
-                    item.close()
-                except Exception:
-                    pass
+        yield browser, context, page
 
 
 class BrowserStealthManager:
