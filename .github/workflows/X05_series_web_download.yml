@@ -25,7 +25,7 @@ concurrency:
 jobs:
   scrape-and-upload:
     runs-on: ubuntu-latest
-    timeout-minutes: 240
+    timeout-minutes: 350
 
     steps:
       - name: 1. Nyahsekat DNS Runner (Guna Cloudflare 1.1.1.1 & Google 8.8.8.8)
@@ -51,10 +51,9 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
-      - name: 5. Pasang Perkakas Rclone & FFmpeg
+      - name: 5. Pasang Perkakas Rclone & Verifikasi FFmpeg
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y ffmpeg curl
+          ffmpeg -version | head -n 1
           curl https://rclone.org/install.sh | sudo bash
 
       - name: 6. Pasang Pustaka Dependensi
