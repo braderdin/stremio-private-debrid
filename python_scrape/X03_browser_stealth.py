@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # ==============================================================================
-# PROJEK: PYTHON SCRAPE ENGINE - AUTOMASI PELAYAR STEALTH
+# PROJEK: PYTHON SCRAPE ENGINE - AUTOMASI PELAYAR STEALTH & ANTI-CLOUDFLARE
 # LOKASI: /home/braderdin/stremio-private-debrid/python_scrape/X03_browser_stealth.py
 # ==============================================================================
 
@@ -42,7 +42,10 @@ def smooth_scroll_down(page: Page, pixels: int = 400):
     steps = 8
     step_px = pixels // steps
     for _ in range(steps):
-        page.mouse.wheel(0, step_px)
+        try:
+            page.mouse.wheel(0, step_px)
+        except Exception:
+            pass
         time.sleep(random.uniform(0.05, 0.12))
     human_delay(1.0, 1.8)
 
@@ -61,7 +64,7 @@ def smart_human_type(locator: Locator, page: Page, text: str):
     time.sleep(random.uniform(0.3, 0.5))
 
     for idx, char in enumerate(text):
-        char_delay = random.uniform(0.14, 0.25) if char in " -_.,/" else random.uniform(0.08, 0.18)
+        char_delay = random.uniform(0.14, 0.25) if char in " -_.,/'" else random.uniform(0.08, 0.18)
         locator.press_sequentially(char, delay=int(char_delay * 1000))
 
         if idx > 0 and idx % random.randint(5, 7) == 0 and random.random() < 0.20:
@@ -79,7 +82,27 @@ def smart_human_type(locator: Locator, page: Page, text: str):
     human_delay(1.2, 2.2)
 
 
-def find_search_input(page: Page, timeout_sec: int = 15) -> Optional[Locator]:
+def resolve_cloudflare_turnstile(page: Page, max_retries: int = 20):
+    """Pemeriksaan dan klik cabaran Cloudflare Turnstile (daripada kod asal B2)."""
+    for _ in range(max_retries):
+        page.wait_for_timeout(1000)
+        try:
+            for frame in page.frames:
+                if "challenges.cloudflare.com" in frame.url or "turnstile" in frame.url:
+                    chk = frame.query_selector("input[type=checkbox], .ctp-checkbox-label, #challenge-stage")
+                    if chk:
+                        console.print("[dim yellow][*] Mengklik cabaran Cloudflare Turnstile...[/dim yellow]")
+                        chk.click()
+                        page.wait_for_timeout(1500)
+
+            content = page.content().lower()
+            if "just a moment" not in content and "attention required" not in content:
+                break
+        except Exception:
+            continue
+
+
+def find_search_input(page: Page, timeout_sec: int = 40) -> Optional[Locator]:
     console.print("[cyan][*] Mengesan kotak input carian...[/cyan]")
     selectors = [
         'input[type="search"]',
@@ -96,6 +119,9 @@ def find_search_input(page: Page, timeout_sec: int = 15) -> Optional[Locator]:
 
     start_time = time.time()
     while time.time() - start_time < timeout_sec:
+        # Periksa Turnstile jika halaman masih disekat
+        resolve_cloudflare_turnstile(page, max_retries=1)
+
         for frame in [page] + page.frames:
             for sel in selectors:
                 try:
@@ -323,12 +349,12 @@ def activate_hydrax_and_open_popup(page: Page) -> Page:
             if first_item.is_visible(timeout=500):
                 popup_btn = first_item
                 break
-        except Exception:
-            continue
+            except Exception:
+                continue
 
-    if not popup_btn:
-        console.print("[yellow][!] Butang 'Popup' tidak ditemui; kekal pada laman semasa.[/yellow]")
-        return page
+        if not popup_btn:
+            console.print("[yellow][!] Butang 'Popup' tidak ditemui; kekal pada laman semasa.[/yellow]")
+            return page
 
     console.print("[bold green][✓] Butang 'Popup' ditemui! Mengklik untuk membuka pemain...[/bold green]")
     popup_btn.scroll_into_view_if_needed()
@@ -377,10 +403,10 @@ def launch_camoufox_session():
                     pass
 
 
-# Pembungkus kelas untuk mengekalkan keserasian import
 class BrowserStealthManager:
     launch_session = staticmethod(launch_camoufox_session)
     find_search_input = staticmethod(find_search_input)
     select_dropdown_match = staticmethod(select_dropdown_match)
     ensure_movie_watch_page = staticmethod(ensure_movie_watch_page)
     activate_hydrax_and_open_popup = staticmethod(activate_hydrax_and_open_popup)
+    resolve_cloudflare_turnstile = staticmethod(resolve_cloudflare_turnstile)

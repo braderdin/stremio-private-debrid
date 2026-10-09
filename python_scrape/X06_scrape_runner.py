@@ -39,7 +39,8 @@ from X03_browser_stealth import (
     smart_human_type,
     select_dropdown_match,
     ensure_movie_watch_page,
-    activate_hydrax_and_open_popup
+    activate_hydrax_and_open_popup,
+    resolve_cloudflare_turnstile
 )
 from X04_stream_capture import configure_resolution_and_sniff
 from X05_sync_bridge import sync_bridge
@@ -48,11 +49,14 @@ console = Console()
 
 
 def execute_step01(page: Page, target_url: str, search_query: str) -> Tuple[Page, Dict[str, str]]:
-    """Melaksanakan Langkah 1 (100% daripada kod rujukan X01_step01_search_nav_2.py)."""
+    """Melaksanakan Langkah 1: Navigasi, carian, pemilihan Hydrax, dan popup pemain."""
     console.print("\n[bold blue]=== [LANGKAH 1: NAVIGASI, HYDRAX & POPUP RESOLUSI] ===[/bold blue]")
     console.print(f"[*] Melayari laman sasaran: [underline]{target_url}[/underline]")
     page.goto(target_url, wait_until="domcontentloaded", timeout=45000)
     human_delay(2.5, 4.0)
+
+    # Lepaskan sekatan Cloudflare Turnstile terlebih dahulu
+    resolve_cloudflare_turnstile(page)
 
     input_box = find_search_input(page)
     if not input_box:
@@ -235,7 +239,7 @@ def execute_scrape_pipeline(imdb_id: str, clean_title: str, force: bool = False)
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="X06 Web Scrape Runner Core Engine")
     parser.add_argument("--imdb", required=True, help="IMDb identifier")
-    parser.add_argument("--title", required=True, help="Tajuk video bersama tahun (cth: Promise at Dawn 2017)")
+    parser.add_argument("--title", required=True, help="Tajuk video bersama tahun (cth: Kaabil 2017)")
     parser.add_argument("--force", action="store_true", help="Paksa muat turun semula")
     args = parser.parse_args()
 

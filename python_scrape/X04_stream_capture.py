@@ -7,15 +7,18 @@
 import os
 import sys
 import time
-from typing import Dict
+from pathlib import Path
+from typing import Dict, Any, Optional
+
 from playwright.sync_api import Page
 from rich.console import Console
 
-SCRAPE_DIR = Path(__file__).resolve().parent if "__file__" in locals() else None
-from pathlib import Path
-if SCRAPE_DIR and str(SCRAPE_DIR) not in sys.path:
+# Penyelarasan laluan direktori (Path diimport terlebih dahulu)
+SCRAPE_DIR = Path(__file__).resolve().parent
+if str(SCRAPE_DIR) not in sys.path:
     sys.path.insert(0, str(SCRAPE_DIR))
 
+import X00_scrape_config as cfg
 from X03_browser_stealth import human_delay
 
 console = Console()
@@ -30,9 +33,10 @@ def configure_resolution_and_sniff(player_page: Page, wait_timeout: int = 40) ->
         user_agent_str = None
 
     intercepted = {
+        "status": "failed",
         "stream_url": "",
         "referer": player_page.url,
-        "user_agent": user_agent_str or "",
+        "user_agent": user_agent_str or cfg.USER_AGENT_DESKTOP,
         "quality": "unknown"
     }
 
@@ -85,6 +89,7 @@ def configure_resolution_and_sniff(player_page: Page, wait_timeout: int = 40) ->
         if intercepted["quality"] == "1080p" and quality != "1080p":
             return
 
+        intercepted["status"] = "success"
         intercepted["stream_url"] = url
         intercepted["quality"] = quality
         intercepted["referer"] = headers.get("referer", player_page.url)
@@ -276,10 +281,10 @@ def configure_resolution_and_sniff(player_page: Page, wait_timeout: int = 40) ->
     else:
         console.print("[yellow][!] Butang Gear tidak ditemui; meneruskan pemintasan pautan sedia ada.[/yellow]")
 
-    console.print("[cyan][*] Menunggu penjejakan pautan strim media...[/cyan]")
+    console.print(f"[cyan][*] Menunggu penjejakan pautan strim media (sehingga {wait_timeout}s)...[/cyan]")
     start_sniff = time.time()
     while time.time() - start_sniff < wait_timeout:
-        if intercepted["stream_url"]:
+        if intercepted["status"] == "success" and intercepted["stream_url"]:
             break
         player_page.wait_for_timeout(500)
 
@@ -291,3 +296,10 @@ def configure_resolution_and_sniff(player_page: Page, wait_timeout: int = 40) ->
         pass
 
     return intercepted
+
+
+class StreamCaptureManager:
+    capture_stream = staticmethod(configure_resolution_and_sniff)
+
+
+stream_capture = StreamCaptureManager()
