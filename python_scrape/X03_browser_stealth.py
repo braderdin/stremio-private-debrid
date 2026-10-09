@@ -1,29 +1,35 @@
 #!/usr/bin/env python3
 # ==============================================================================
-# PROJEK: PYTHON SCRAPE ENGINE - AUTOMASI PELAYAR & ANTI-CLOUDFLARE
+# PROJEK: PYTHON SCRAPE ENGINE - AUTOMASI PELAYAR STEALTH & ANTI-BOT
 # LOKASI: /home/braderdin/stremio-private-debrid/python_scrape/X03_browser_stealth.py
 # ==============================================================================
 
+import os
+import sys
 import time
 import random
-from typing import Optional
 from pathlib import Path
+from typing import Optional
 from contextlib import contextmanager
 
 from playwright.sync_api import Page, Locator
 from camoufox.sync_api import Camoufox
 from rich.console import Console
 
-SCRAPE_DIR = Path(__file__).resolve().parent
-import X00_scrape_config as cfg
-
-console = Console()
-
 try:
     from rapidfuzz import fuzz
     HAS_RAPIDFUZZ = True
 except ImportError:
     HAS_RAPIDFUZZ = False
+
+console = Console()
+
+# 1. Konfigurasi Modul & Laluan
+SCRAPE_DIR = Path(__file__).resolve().parent
+if str(SCRAPE_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRAPE_DIR))
+
+import X00_scrape_config as cfg
 
 
 def human_delay(min_s: float = 2.0, max_s: float = 4.0, mode: str = "gaussian"):
@@ -43,12 +49,15 @@ def smooth_scroll_down(page: Page, pixels: int = 400):
     steps = 8
     step_px = pixels // steps
     for _ in range(steps):
-        page.mouse.wheel(0, step_px)
-        time.sleep(random.uniform(0.05, 0.12))
-    human_delay(1.0, 1.8)
+        try:
+            page.mouse.wheel(0, step_px)
+        except Exception:
+            pass
+        time.sleep(random.uniform(0.06, 0.14))
+    human_delay(1.2, 2.0)
 
 
-# Alias untuk keselamatan import
+# Alias untuk keserasian import silang
 smooth_scroll = smooth_scroll_down
 
 
@@ -56,17 +65,17 @@ def smart_human_type(locator: Locator, page: Page, text: str):
     """Menaip perkataan mengikut ritme semula jadi papan kekunci."""
     locator.scroll_into_view_if_needed()
     locator.click()
-    human_delay(0.6, 1.2)
+    human_delay(0.8, 1.4)
 
     locator.fill("")
-    time.sleep(random.uniform(0.3, 0.5))
+    time.sleep(random.uniform(0.3, 0.6))
 
     for idx, char in enumerate(text):
-        char_delay = random.uniform(0.14, 0.25) if char in " -_.,/" else random.uniform(0.08, 0.18)
+        char_delay = random.uniform(0.14, 0.25) if char in " -_.,/'" else random.uniform(0.08, 0.18)
         locator.press_sequentially(char, delay=int(char_delay * 1000))
 
-        if idx > 0 and idx % random.randint(5, 7) == 0 and random.random() < 0.20:
-            time.sleep(random.uniform(0.35, 0.65))
+        if idx > 0 and idx % random.randint(4, 7) == 0 and random.random() < 0.25:
+            time.sleep(random.uniform(0.4, 0.8))
 
     if locator.input_value() != text:
         locator.fill(text)
@@ -77,45 +86,39 @@ def smart_human_type(locator: Locator, page: Page, text: str):
     except Exception:
         pass
 
-    human_delay(1.2, 2.2)
+    human_delay(1.5, 2.5)
 
 
-def wait_and_solve_turnstile(page: Page, max_wait: int = 25) -> bool:
-    """Mengesan dan melepasi cabaran Cloudflare Turnstile 'Just a moment...'."""
-    start_t = time.time()
-    while time.time() - start_t < max_wait:
-        title_lower = (page.title() or "").lower()
-        content_lower = ""
-        try:
-            content_lower = (page.content() or "").lower()
-        except Exception:
-            pass
+def solve_turnstile_if_present(page: Page) -> bool:
+    """Mengesan dan menekan cabaran Cloudflare Turnstile sekiranya dihalang."""
+    try:
+        title_text = (page.title() or "").lower()
+        if "just a moment" not in title_text and "attention required" not in title_text:
+            return False
 
-        if "just a moment" not in title_lower and "attention required" not in title_lower and "just a moment" not in content_lower:
-            return True
-
-        console.print("[dim yellow]🛡️ Mengesan cabaran Cloudflare 'Just a moment...' Sedang menyelesaikan...[/dim yellow]")
+        console.print("[dim yellow]🛡️ Mengesan cabaran Cloudflare ('Just a moment...'). Mencuba melepasi perlahan-lahan...[/dim yellow]")
         for frame in page.frames:
             try:
                 if "challenges.cloudflare.com" in frame.url or "turnstile" in frame.url:
                     chk = frame.locator("input[type=checkbox], .ctp-checkbox-label, #challenge-stage").first
-                    if chk.is_visible(timeout=400):
+                    if chk.is_visible(timeout=500):
+                        human_delay(1.0, 2.0)
                         chk.click(force=True)
-                        human_delay(1.5, 2.5)
-                        break
+                        human_delay(3.0, 5.0)
+                        return True
             except Exception:
                 continue
-
-        time.sleep(1.0)
+    except Exception:
+        pass
     return False
 
 
-def find_search_input(page: Page, timeout_sec: int = 20) -> Optional[Locator]:
-    console.print("[cyan][*] Mengesan kotak input carian...[/cyan]")
-
-    # Lepasi Turnstile terlebih dahulu sekiranya ditahan Cloudflare
-    wait_and_solve_turnstile(page, max_wait=20)
-
+def find_search_input(page: Page, timeout_sec: int = 300) -> Optional[Locator]:
+    """
+    Mengesan kotak input carian dengan fallback pintar dan pusingan menunggu yang tenang.
+    Tidak terburu-buru dan memberi masa untuk halaman memuatkan elemen.
+    """
+    console.print("[cyan][*] Mengesan kotak input carian (mod sabar & teliti)...[/cyan]")
     selectors = [
         'input[type="search"]',
         'input[name*="search" i]',
@@ -130,43 +133,67 @@ def find_search_input(page: Page, timeout_sec: int = 20) -> Optional[Locator]:
     ]
 
     start_time = time.time()
+    attempt_count = 0
+
     while time.time() - start_time < timeout_sec:
+        attempt_count += 1
+
+        # 1. Periksa dan kendalikan Turnstile jika tersangkut
+        solve_turnstile_if_present(page)
+
+        # 2. Imbas elemen kotak carian pada halaman dan semua frame
         for frame in [page] + page.frames:
             for sel in selectors:
                 try:
                     loc = frame.locator(sel).first
-                    if loc.is_visible(timeout=250):
+                    if loc.is_visible(timeout=300):
                         console.print(f"[green][✓] Kotak carian ditemui: '{sel}'[/green]")
                         return loc
                 except Exception:
                     continue
 
-        trigger_buttons = ['button[aria-label*="search" i]', 'button[title*="search" i]', '.search-toggle', '#search-button']
+        # 3. Cuba tekan butang ikon carian sekiranya bar carian tersembunyi
+        trigger_buttons = [
+            'button[aria-label*="search" i]',
+            'button[title*="search" i]',
+            '.search-toggle',
+            '#search-button',
+            'a.search-btn',
+            '.icon-search'
+        ]
         for btn_sel in trigger_buttons:
             try:
                 btn = page.locator(btn_sel).first
-                if btn.is_visible(timeout=250):
+                if btn.is_visible(timeout=300):
                     btn.click()
-                    human_delay(1.0, 1.8)
+                    human_delay(1.5, 2.5)
                     break
             except Exception:
                 continue
 
-        page.wait_for_timeout(400)
+        # 4. Semak fallback input teks biasa
+        try:
+            for frame in [page] + page.frames:
+                generic_inputs = frame.locator('input[type="text"]').all()
+                for inp in generic_inputs:
+                    if inp.is_visible():
+                        console.print("[green][✓] Kotak carian ditemui melalui generic input[type=text][/green]")
+                        return inp
+        except Exception:
+            pass
 
-    try:
-        generic_inputs = page.locator('input[type="text"]').all()
-        for inp in generic_inputs:
-            if inp.is_visible():
-                console.print("[green][✓] Kotak carian ditemui melalui input[type=text][/green]")
-                return inp
-    except Exception:
-        pass
+        if attempt_count % 10 == 0:
+            elapsed = int(time.time() - start_time)
+            console.print(f"[dim yellow]⏳ Masih menunggu halaman bersedia ({elapsed}s berlalu)... Status: '{page.title()}'[/dim yellow]")
+
+        # Rehat seketika sebelum percubaan seterusnya (ritme semula jadi, bukan laju)
+        time.sleep(random.uniform(2.0, 3.5))
 
     return None
 
 
-def select_dropdown_match(page: Page, query_text: str, timeout_sec: int = 8) -> bool:
+def select_dropdown_match(page: Page, query_text: str, timeout_sec: int = 12) -> bool:
+    """Memeriksa menu dropdown cadangan (100% kod asal X01_step01a_nav)."""
     console.print(f"[cyan][*] Memeriksa menu dropdown cadangan bagi: '{query_text}'...[/cyan]")
     dropdown_containers = [
         '[role="listbox"]',
@@ -188,7 +215,7 @@ def select_dropdown_match(page: Page, query_text: str, timeout_sec: int = 8) -> 
         for c_sel in dropdown_containers:
             try:
                 c_loc = page.locator(c_sel).first
-                if c_loc.is_visible(timeout=250):
+                if c_loc.is_visible(timeout=300):
                     scope = c_loc
                     break
             except Exception:
@@ -228,27 +255,28 @@ def select_dropdown_match(page: Page, query_text: str, timeout_sec: int = 8) -> 
 
         if best_element:
             break
-        page.wait_for_timeout(350)
+        page.wait_for_timeout(400)
 
     if best_element:
         try:
             console.print(f"[green][✓] Cadangan dropdown dipilih (Skor: {highest_score}). Mengklik...[/green]")
             best_element.scroll_into_view_if_needed()
-            human_delay(0.6, 1.2)
+            human_delay(0.8, 1.5)
             best_element.click()
-            human_delay(3.0, 4.5)
+            human_delay(3.5, 5.0)
             return True
         except Exception:
             pass
 
     console.print("[yellow][!] Menekan 'Enter' sebagai alternatif dropdown...[/yellow]")
     page.keyboard.press("Enter")
-    human_delay(3.0, 4.5)
+    human_delay(3.5, 5.0)
     return False
 
 
 def ensure_movie_watch_page(page: Page, query_text: str) -> Page:
-    human_delay(2.0, 3.5)
+    """Memastikan berada di laman tontonan video sebenar (100% kod asal X01_step01a_nav)."""
+    human_delay(2.5, 4.0)
 
     has_ganti_player = page.locator("text=/GANTI PLAYER/i").count() > 0
     has_hydrax_text = page.locator("text=/HYDRAX/i").count() > 0
@@ -283,17 +311,18 @@ def ensure_movie_watch_page(page: Page, query_text: str) -> Page:
     if target_link:
         console.print("[green][✓] Membuka halaman video yang tepat...[/green]")
         target_link.scroll_into_view_if_needed()
-        human_delay(0.8, 1.5)
+        human_delay(1.0, 1.8)
         target_link.click()
-        human_delay(4.0, 6.0)
+        human_delay(4.5, 6.5)
 
     return page
 
 
 def activate_hydrax_and_open_popup(page: Page) -> Page:
+    """Mengesan bar pelayan Hydrax dan membuka popup pemain (100% kod asal X01_step01a_nav)."""
     console.print("\n[bold yellow][*] Mengesan bar pelayan di bawah video...[/bold yellow]")
     smooth_scroll_down(page, pixels=350)
-    human_delay(1.5, 2.5)
+    human_delay(1.8, 2.8)
 
     hydrax_locators = [
         page.locator("text=/^\\s*HYDRAX\\s*$/i"),
@@ -306,7 +335,7 @@ def activate_hydrax_and_open_popup(page: Page) -> Page:
 
     hydrax_btn = None
     start_find = time.time()
-    while time.time() - start_find < 15:
+    while time.time() - start_find < 20:
         for loc in hydrax_locators:
             try:
                 first_item = loc.first
@@ -362,9 +391,9 @@ def activate_hydrax_and_open_popup(page: Page) -> Page:
             except Exception:
                 continue
 
-        if not popup_btn:
-            console.print("[yellow][!] Butang 'Popup' tidak ditemui; kekal pada laman semasa.[/yellow]")
-            return page
+    if not popup_btn:
+        console.print("[yellow][!] Butang 'Popup' tidak ditemui; kekal pada laman semasa.[/yellow]")
+        return page
 
     console.print("[bold green][✓] Butang 'Popup' ditemui! Mengklik untuk membuka pemain...[/bold green]")
     popup_btn.scroll_into_view_if_needed()
@@ -395,12 +424,11 @@ def activate_hydrax_and_open_popup(page: Page) -> Page:
 
 @contextmanager
 def launch_camoufox_session():
-    """Melancarkan Camoufox dengan konfigurasi Stealth terbina."""
+    """Melancarkan Camoufox dengan kawalan konteks yang selamat dan bersih."""
     is_headless = cfg.BROWSER_HEADLESS
     status_txt = "Latar Belakang (Headless)" if is_headless else "Paparan Visual (GUI Terbuka)"
     console.print(f"[cyan]🚀 Melancarkan Pelayar Camoufox: [bold green]{status_txt}[/bold green]...[/cyan]")
 
-    # Biarkan Camoufox menguruskan cap jari User-Agent secara selamat tanpa penukaran paksa
     with Camoufox(headless=is_headless, geoip=True) as browser:
         context = browser.new_context(viewport={"width": 1366, "height": 768})
         page = context.new_page()
@@ -409,6 +437,9 @@ def launch_camoufox_session():
         finally:
             try:
                 page.close()
+            except Exception:
+                pass
+            try:
                 context.close()
             except Exception:
                 pass
