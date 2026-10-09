@@ -52,20 +52,6 @@ jobs:
             https://api.github.com/repos/braderdin/stremio-sub-addon/dispatches \
             -d '{"event_type":"ondemand_scrape","client_payload":{"imdb_id":"${{ inputs.imdb_id }}"}}'
 
-      # =========================================================================
-      # LANGKAH 5a: PICU ENJIN WEB SCRAPER (X05_series_web_download.yml) - ASYNC
-      # =========================================================================
-      - name: 5a. Picu Enjin Web Scraper di Latar Belakang (Anti-Duplikasi Aktif)
-        continue-on-error: true
-        run: |
-          echo "🌐 Mencetuskan X05_series_web_download.yml untuk IMDb: ${{ inputs.imdb_id }}..."
-          curl -s -X POST \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer ${{ secrets.GH_PAT }}" \
-            https://api.github.com/repos/${{ github.repository }}/actions/workflows/X05_series_web_download.yml/dispatches \
-            -d "{\"ref\":\"main\",\"inputs\":{\"imdb_id\":\"${{ inputs.imdb_id }}\",\"title\":\"${{ inputs.title }}\"}}"
-          echo "✅ Enjin X05 berjaya dicetuskan di latar belakang."
-
       - name: 6. Laksanakan Enjin X03_series_seeder_lister.py
         env:
           REDIS_ACCOUNTS_JSON: ${{ secrets.REDIS_ACCOUNTS_JSON }}
@@ -82,6 +68,85 @@ jobs:
           python live_engine_v3/X06_seeder_multisource_lister.py \
             --imdb "${{ inputs.imdb_id }}" \
             --title "${{ inputs.title }}"
+
+      # =========================================================================
+      # LANGKAH 7a: RESOLUSI TAJUK BERSIH & CETUS X05 WEB SCRAPER (SELEPAS X06)
+      # =========================================================================
+      - name: 7a. Dapatkan Tajuk Bersih & Picu Enjin Web Scraper (X05)
+        continue-on-error: true
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          IMDB_INPUT: ${{ inputs.imdb_id }}
+          TITLE_INPUT: ${{ inputs.title }}
+          REPO_NAME: ${{ github.repository }}
+        run: |
+          python3 - << 'EOF'
+          import os
+          import re
+          import json
+          import urllib.request
+          import subprocess
+
+          imdb_id = os.environ.get("IMDB_INPUT", "").strip()
+          raw_title = os.environ.get("TITLE_INPUT", "").strip()
+          gh_pat = os.environ.get("GH_PAT", "").strip()
+          repo = os.environ.get("REPO_NAME", "").strip()
+
+          base_id = imdb_id.split(":")[0]
+          is_series = ":" in imdb_id
+          media_type = "series" if is_series else "movie"
+
+          clean_title = raw_title
+          # Jika tajuk kosong atau mengandungi kod IMDb (cth: tt4765284), ambil tajuk rasmi Cinemeta
+          if not clean_title or re.match(r"^tt\d+", clean_title, re.IGNORECASE):
+              try:
+                  url = f"https://v3-cinemeta.strem.io/meta/{media_type}/{base_id}.json"
+                  req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                  with urllib.request.urlopen(req, timeout=8) as resp:
+                      if resp.status == 200:
+                          data = json.loads(resp.read().decode("utf-8"))
+                          name = data.get("meta", {}).get("name", "")
+                          if name:
+                              clean_title = name.strip()
+              except Exception as e:
+                  print(f"⚠️ Gagal mendapatkan Cinemeta: {e}")
+
+          if not clean_title or re.match(r"^tt\d+", clean_title, re.IGNORECASE):
+              clean_title = base_id
+
+          print(f"🎬 IMDb ID     : {imdb_id}")
+          print(f"🎯 Tajuk Bersih: {clean_title}")
+
+          # Cetus alur kerja X05_series_web_download.yml dengan tajuk bersih sebenar
+          dispatch_url = f"https://api.github.com/repos/{repo}/actions/workflows/X05_series_web_download.yml/dispatches"
+          payload = json.dumps({
+              "ref": "main",
+              "inputs": {
+                  "imdb_id": imdb_id,
+                  "title": clean_title,
+                  "force": "false"
+              }
+          }).encode("utf-8")
+
+          req = urllib.request.Request(
+              dispatch_url,
+              data=payload,
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "Authorization": f"Bearer {gh_pat}",
+                  "Content-Type": "application/json"
+              }
+          )
+
+          try:
+              with urllib.request.urlopen(req, timeout=10) as resp:
+                  if resp.status in [200, 204]:
+                      print(f"✅ Alur kerja X05 berjaya dicetuskan dengan tajuk: '{clean_title}'!")
+                  else:
+                      print(f"⚠️ Status respons GitHub API: {resp.status}")
+          except Exception as e:
+              print(f"❌ Ralat semasa mencetuskan X05: {e}")
+          EOF
 
       - name: 8. Hantar Notifikasi Senarai Seeder ke Telegram
         env:

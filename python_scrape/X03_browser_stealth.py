@@ -2,11 +2,6 @@
 # ==============================================================================
 # PROJEK: PYTHON SCRAPE ENGINE - AUTOMASI PELAYAR CAMOUFOX & ANTI-IKLAN STEALTH
 # LOKASI: /home/braderdin/stremio-private-debrid/python_scrape/X03_browser_stealth.py
-# CIRI:
-# 1. Mengimport 100% Gaya Pergerakan Manusia Asal dari X01_step01a_nav.py.
-# 2. Ritme Penaipan Natural (smart_human_type) & Penatalan Berperingkat.
-# 3. Pengendali Cloudflare Turnstile & Pengesan Tab Iklan Agresif.
-# 4. Pemadanan Dropdown & Kad Filem Sasaran Berasaskan Rapidfuzz.
 # ==============================================================================
 
 import time
@@ -44,7 +39,7 @@ def human_delay(min_s: float = 2.0, max_s: float = 4.0, mode: str = "gaussian"):
 
 
 def smooth_scroll_down(page: Page, pixels: int = 400):
-    """Skrol halaman ke bawah secara berperingkat agar elemen penting kelihatan."""
+    """Skrol halaman ke bawah secara berperingkat agar elemen di bawah kelihatan."""
     steps = 8
     step_px = pixels // steps
     for _ in range(steps):
@@ -53,8 +48,12 @@ def smooth_scroll_down(page: Page, pixels: int = 400):
     human_delay(1.0, 1.8)
 
 
+# Alias untuk keserasian import silang
+smooth_scroll = smooth_scroll_down
+
+
 def smart_human_type(locator: Locator, page: Page, text: str):
-    """Menaip perkataan mengikut ritme semula jadi papan kekunci (dari X01_step01a_nav)."""
+    """Menaip perkataan mengikut ritme semula jadi papan kekunci."""
     locator.scroll_into_view_if_needed()
     locator.click()
     human_delay(0.6, 1.2)
@@ -83,7 +82,7 @@ def smart_human_type(locator: Locator, page: Page, text: str):
 
 class BrowserStealthManager:
     @staticmethod
-    def handle_cloudflare_challenge(page: Page, max_wait_sec: int = 20) -> bool:
+    def handle_cloudflare_challenge(page: Page, max_wait_sec: int = 15) -> bool:
         """Mengesan dan menekan Turnstile Cloudflare jika disekat di GitHub Actions."""
         start_t = time.time()
         while time.time() - start_t < max_wait_sec:
@@ -93,7 +92,6 @@ class BrowserStealthManager:
             if "just a moment" not in page_title and "attention required" not in page_title and "challenges.cloudflare" not in page_content:
                 return True
 
-            console.print("[dim yellow]🛡️ Mengesan cabaran Cloudflare/Turnstile... Menyelesaikan...[/dim yellow]")
             for frame in page.frames:
                 try:
                     if "challenges.cloudflare.com" in frame.url or "turnstile" in frame.url:
@@ -104,7 +102,6 @@ class BrowserStealthManager:
                             break
                 except Exception:
                     continue
-
             time.sleep(1.0)
         return False
 
@@ -173,10 +170,8 @@ class BrowserStealthManager:
 
         start_time = time.time()
         while time.time() - start_time < timeout_sec:
-            # 1. Semak Turnstile jika terperangkap
             BrowserStealthManager.handle_cloudflare_challenge(page, max_wait_sec=2)
 
-            # 2. Imbas semua selektor merentasi semua rangka (frames)
             for frame in [page] + page.frames:
                 for sel in selectors:
                     try:
@@ -187,7 +182,6 @@ class BrowserStealthManager:
                     except Exception:
                         continue
 
-            # 3. Cuba tekan butang ikon carian jika tersorok
             trigger_buttons = ['button[aria-label*="search" i]', 'button[title*="search" i]', '.search-toggle', '#search-button']
             for btn_sel in trigger_buttons:
                 try:
@@ -201,7 +195,7 @@ class BrowserStealthManager:
 
             page.wait_for_timeout(400)
 
-        # 4. Fallback Terakhir: Ambil input teks biasa yang sedang kelihatan di laman
+        # Fallback teks biasa
         try:
             for frame in [page] + page.frames:
                 generic_inputs = frame.locator('input[type="text"]').all()
@@ -216,7 +210,6 @@ class BrowserStealthManager:
 
     @staticmethod
     def select_dropdown_match(page: Page, query_text: str, timeout_sec: int = 8) -> bool:
-        """Memeriksa dropdown cadangan (100% daripada kod asal X01_step01a_nav.py)."""
         console.print(f"[cyan][*] Memeriksa menu dropdown cadangan bagi: '{query_text}'...[/cyan]")
         dropdown_containers = [
             '[role="listbox"]', '[role="menu"]',
@@ -294,7 +287,6 @@ class BrowserStealthManager:
 
     @staticmethod
     def ensure_movie_watch_page(page: Page, query_text: str) -> Page:
-        """Memastikan berada di laman tontonan video sebenar (100% dari X01_step01a_nav.py)."""
         human_delay(2.0, 3.5)
 
         has_ganti_player = page.locator("text=/GANTI PLAYER/i").count() > 0
