@@ -84,6 +84,7 @@ jobs:
 
       - name: 10. Laksanakan Enjin Scraper Utama (X06_scrape_runner.py)
         env:
+          TARGET_WEB_URL: ${{ secrets.TARGET_WEB_URL }}
           REDIS_ACCOUNTS_JSON: ${{ secrets.REDIS_ACCOUNTS_JSON }}
           B2_ACCOUNTS_JSON: ${{ secrets.B2_ACCOUNTS_JSON }}
           TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
