@@ -69,10 +69,10 @@ jobs:
             --imdb "${{ inputs.imdb_id }}" \
             --title "${{ inputs.title }}"
 
+# =========================================================================
+      # LANGKAH 7a: DAPATKAN TAJUK BERSIH + TAHUN & CETUS X05 (SELEPAS X06)
       # =========================================================================
-      # LANGKAH 7a: RESOLUSI TAJUK BERSIH & CETUS X05 WEB SCRAPER (SELEPAS X06)
-      # =========================================================================
-      - name: 7a. Dapatkan Tajuk Bersih & Picu Enjin Web Scraper (X05)
+      - name: 7a. Dapatkan Tajuk Bersih + Tahun & Picu Enjin Web Scraper (X05)
         continue-on-error: true
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
@@ -85,7 +85,6 @@ jobs:
           import re
           import json
           import urllib.request
-          import subprocess
 
           imdb_id = os.environ.get("IMDB_INPUT", "").strip()
           raw_title = os.environ.get("TITLE_INPUT", "").strip()
@@ -96,34 +95,52 @@ jobs:
           is_series = ":" in imdb_id
           media_type = "series" if is_series else "movie"
 
-          clean_title = raw_title
-          # Jika tajuk kosong atau mengandungi kod IMDb (cth: tt4765284), ambil tajuk rasmi Cinemeta
-          if not clean_title or re.match(r"^tt\d+", clean_title, re.IGNORECASE):
-              try:
-                  url = f"https://v3-cinemeta.strem.io/meta/{media_type}/{base_id}.json"
-                  req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-                  with urllib.request.urlopen(req, timeout=8) as resp:
-                      if resp.status == 200:
-                          data = json.loads(resp.read().decode("utf-8"))
-                          name = data.get("meta", {}).get("name", "")
-                          if name:
-                              clean_title = name.strip()
-              except Exception as e:
-                  print(f"⚠️ Gagal mendapatkan Cinemeta: {e}")
+          clean_name = ""
+          year_val = ""
 
-          if not clean_title or re.match(r"^tt\d+", clean_title, re.IGNORECASE):
-              clean_title = base_id
+          # 1. Dapatkan nama rasmi dan tahun daripada Cinemeta
+          try:
+              url = f"https://v3-cinemeta.strem.io/meta/{media_type}/{base_id}.json"
+              req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+              with urllib.request.urlopen(req, timeout=8) as resp:
+                  if resp.status == 200:
+                      data = json.loads(resp.read().decode("utf-8"))
+                      meta = data.get("meta", {})
+                      clean_name = meta.get("name", "").strip()
+                      raw_year = str(meta.get("year", "")).strip()
+                      year_val = raw_year.split("–")[0].split("-")[0].strip()
+          except Exception as e:
+              print(f"⚠️ Cinemeta fetch warning: {e}")
 
-          print(f"🎬 IMDb ID     : {imdb_id}")
-          print(f"🎯 Tajuk Bersih: {clean_title}")
+          # 2. Jika Cinemeta kosong, gunakan fallback title
+          if not clean_name:
+              if raw_title and not re.match(r"^tt\d+", raw_title, re.IGNORECASE):
+                  clean_name = raw_title.strip()
+              else:
+                  clean_name = base_id
 
-          # Cetus alur kerja X05_series_web_download.yml dengan tajuk bersih sebenar
+          # 3. Bentuk tajuk carian penuh bersama Tahun atau Episod
+          if is_series:
+              parts = imdb_id.split(":")
+              s_num = int(parts[1]) if len(parts) > 1 else 1
+              e_num = int(parts[2]) if len(parts) > 2 else 1
+              final_search_title = f"{clean_name} S{s_num:02d}E{e_num:02d}"
+          else:
+              if year_val and year_val not in clean_name:
+                  final_search_title = f"{clean_name} {year_val}"
+              else:
+                  final_search_title = clean_name
+
+          print(f"🎬 IMDb ID        : {imdb_id}")
+          print(f"🎯 Tajuk + Tahun  : {final_search_title}")
+
+          # 4. Cetus alur kerja X05_series_web_download.yml
           dispatch_url = f"https://api.github.com/repos/{repo}/actions/workflows/X05_series_web_download.yml/dispatches"
           payload = json.dumps({
               "ref": "main",
               "inputs": {
                   "imdb_id": imdb_id,
-                  "title": clean_title,
+                  "title": final_search_title,
                   "force": "false"
               }
           }).encode("utf-8")
@@ -141,7 +158,7 @@ jobs:
           try:
               with urllib.request.urlopen(req, timeout=10) as resp:
                   if resp.status in [200, 204]:
-                      print(f"✅ Alur kerja X05 berjaya dicetuskan dengan tajuk: '{clean_title}'!")
+                      print(f"✅ Alur kerja X05 berjaya dicetuskan: '{final_search_title}'!")
                   else:
                       print(f"⚠️ Status respons GitHub API: {resp.status}")
           except Exception as e:
