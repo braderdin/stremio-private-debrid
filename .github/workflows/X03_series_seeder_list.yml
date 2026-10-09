@@ -52,6 +52,20 @@ jobs:
             https://api.github.com/repos/braderdin/stremio-sub-addon/dispatches \
             -d '{"event_type":"ondemand_scrape","client_payload":{"imdb_id":"${{ inputs.imdb_id }}"}}'
 
+      # =========================================================================
+      # LANGKAH 5a: PICU ENJIN WEB SCRAPER (X05_series_web_download.yml) - ASYNC
+      # =========================================================================
+      - name: 5a. Picu Enjin Web Scraper di Latar Belakang (Anti-Duplikasi Aktif)
+        continue-on-error: true
+        run: |
+          echo "🌐 Mencetuskan X05_series_web_download.yml untuk IMDb: ${{ inputs.imdb_id }}..."
+          curl -s -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.GH_PAT }}" \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/X05_series_web_download.yml/dispatches \
+            -d "{\"ref\":\"main\",\"inputs\":{\"imdb_id\":\"${{ inputs.imdb_id }}\",\"title\":\"${{ inputs.title }}\"}}"
+          echo "✅ Enjin X05 berjaya dicetuskan di latar belakang."
+
       - name: 6. Laksanakan Enjin X03_series_seeder_lister.py
         env:
           REDIS_ACCOUNTS_JSON: ${{ secrets.REDIS_ACCOUNTS_JSON }}
