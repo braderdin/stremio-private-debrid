@@ -2,17 +2,17 @@
 httpx>=0.28.1
 rich>=15.0.0
 python-dotenv>=1.2.4
-pydantic>=2.13.5
+pydantic>=2.14.1
 
 # Integrasi Kawalan aria2c di Runner
-aria2p>=0.12.1
+aria2p>=0.12.3
 
 # Pustaka Sandaran Pemprosesan & Rangkaian Pantas
 curl-cffi>=0.16.3
-camoufox[geoip]>=0.5.6
+camoufox[geoip]>=0.5.8
 DrissionPage>=4.1.1.4
 beautifulsoup4>=4.15.0
-tenacity>=9.1.4
+tenacity>=9.2.1
 guessit>=4.4.0
 cinemagoer>=2026.8.20
 rapidfuzz>=3.0.0
