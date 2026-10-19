@@ -6,6 +6,10 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 20
+    # Kunci versi playwright diletakkan di sini
+    ignore:
+      - dependency-name: "playwright"
+        versions: [">= 1.63.0"]
     # Kelompokkan pembaruan minor & patch ke dalam 1 PR terpadu
     groups:
       python-minor-patch:
@@ -28,3 +32,7 @@ updates:
         update-types:
           - "minor"
           - "patch"
+
+ignore:
+      - dependency-name: "playwright"
+        versions: [">= 1.63.0"]
