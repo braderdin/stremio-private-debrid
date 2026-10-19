@@ -248,7 +248,7 @@ def run_storage_guard(
     table.add_column("Nama Baldi", style="white", width=26)
     table.add_column("Fail", justify="center", style="yellow", width=6)
     table.add_column("Digunakan", justify="right", style="white", width=11)
-    table.add_column("Baki Bebas (Had 8GB)", justify="right", style="green", width=14)
+    table.add_column(f"Baki Bebas (Had {safe_cap_gb:.0f}GB)", justify="right", style="green", width=14)
     table.add_column("Status Pengawal", justify="center", width=18)
 
     for u in usage_list:
@@ -261,7 +261,7 @@ def run_storage_guard(
         if free_gb >= required_free_gb:
             status_tag = "[bold green]SIAP SEDIA ★[/bold green]"
         elif used_gb >= safe_cap_gb:
-            status_tag = "[bold red]PENUH (>8GB)[/bold red]"
+            status_tag = f"[bold red]PENUH (>{safe_cap_gb:.0f}GB)[/bold red]"
         else:
             status_tag = "[yellow]AMARAN RUANG[/yellow]"
 

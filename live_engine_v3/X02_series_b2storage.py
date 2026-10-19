@@ -4,7 +4,7 @@
 # LOKASI: /home/braderdin/stremio-private-debrid/live_engine_v3/X02_series_b2storage.py
 # CIRI:
 # 1. Native B2 Rclone Engine (Zero-Egress via Cloudflare Proxy)
-# 2. Round-Robin 20 Akaun B2 (Had Selamat 9.5 GB setiap akaun)
+# 2. Round-Robin 50 Akaun B2 (Had Selamat 9.0 GB setiap akaun)
 # 3. Hash-Aware LRU Eviction: Memadam hanya fail fizikal versi lama tanpa
 #    merosakkan versi kualiti lain bagi siri/filem yang sama.
 # ==============================================================================
@@ -33,7 +33,7 @@ for p in [CURRENT_DIR, LIVE_ENGINE_DIR]:
 try:
     _config = importlib.import_module("00_config")
     B2_ACCOUNTS = getattr(_config, "B2_ACCOUNTS", [])
-    B2_MAX_BYTES = getattr(_config, "B2_MAX_BYTES_PER_ACCOUNT", int(8.0 * 1024 * 1024 * 1024))
+    B2_MAX_BYTES = getattr(_config, "B2_MAX_BYTES_PER_ACCOUNT", int(9.0 * 1024 * 1024 * 1024))
     CF_B2_PROXY = getattr(
         _config,
         "CF_WORKER_B2_PROXY_STORAGE",
@@ -42,7 +42,7 @@ try:
 except Exception as e:
     console.print(f"[bold red]❌ Ralat memuatkan konfigurasi dari 00_config: {e}[/bold red]")
     B2_ACCOUNTS = []
-    B2_MAX_BYTES = int(9.5 * 1024 * 1024 * 1024)
+    B2_MAX_BYTES = int(9.0 * 1024 * 1024 * 1024)
     CF_B2_PROXY = "https://b2-proxy-aria-engine.retrogamerg405v.workers.dev"
 
 
@@ -51,7 +51,7 @@ class SeriesB2StorageManager:
         self.accounts = accounts
         self.proxy_base = proxy_base.rstrip("/")
         self.auth_cache: Dict[int, Dict[str, Any]] = {}
-        self.timeout = httpx.Timeout(15.0, connect=8.0)
+        self.timeout = httpx.Timeout(30.0, connect=8.0)
         self.current_rr_index = 0
 
     def authorize_account(self, acc_index: int) -> Optional[Dict[str, Any]]:
@@ -177,7 +177,7 @@ class SeriesB2StorageManager:
         if chosen_acc:
             return chosen_acc
 
-        console.print("[bold yellow]⚠️ Semua 20 akaun B2 penuh! Memulakan pembersihan fail lama (LRU)...[/bold yellow]")
+        console.print("[bold yellow]⚠️ Semua 50 akaun B2 penuh! Memulakan pembersihan fail lama (LRU)...[/bold yellow]")
 
         for _ in range(15):
             oldest_meta = redis_db_instance.get_oldest_stream_across_shards()

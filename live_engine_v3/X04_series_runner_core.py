@@ -287,7 +287,7 @@ def execute_job(info_hash: str, raw_imdb_id: str, file_idx: int, raw_title: str)
         file_size = video_file.stat().st_size
         sha256_hash = calculate_sha256(video_file)
 
-        # 4. Agihan Storan B2 (20 Akaun Round-Robin & LRU Eviction dari live_engine/X02_series_b2storage.py)
+        # 4. Agihan Storan B2 (50 Akaun Round-Robin & LRU Eviction dari live_engine/X02_series_b2storage.py)
         b2_target = storage.allocate_storage_with_eviction(file_size, db)
         if not b2_target:
             console.print("[bold red]❌ Storan B2 tidak mencukupi untuk menampung fail.[/bold red]")
