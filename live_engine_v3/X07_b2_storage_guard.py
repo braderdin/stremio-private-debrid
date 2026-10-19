@@ -212,7 +212,7 @@ def run_storage_guard(
     # Semak sama ada sudah wujud akaun yang mempunyai baki mencukupi
     def find_ready_account(u_list):
         for u in u_list:
-            if not u["success"]:
+            if not u.get("success") or not u.get("bucket_id"):
                 continue
             used = u["used_bytes"]
             free = safe_cap_bytes - used
