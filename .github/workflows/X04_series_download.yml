@@ -73,6 +73,16 @@ jobs:
             --min-free-gb 5.0 \
             --safe-cap-gb 9.0
 
+      - name: 6c. Pengesahan Penuh & Double-Check Storan B2 (X08 Smart Guard)
+        env:
+          REDIS_ACCOUNTS_JSON: ${{ secrets.REDIS_ACCOUNTS_JSON }}
+          B2_ACCOUNTS_JSON: ${{ secrets.B2_ACCOUNTS_JSON }}
+        run: |
+          python live_engine_v3/X08_b2_smart_storage_guard.py \
+            --min-free-gb 5.0 \
+            --safe-cap-gb 9.0 \
+            --max-evict 15
+
       - name: 7. Laksanakan Enjin Runner X04
         env:
           REDIS_ACCOUNTS_JSON: ${{ secrets.REDIS_ACCOUNTS_JSON }}

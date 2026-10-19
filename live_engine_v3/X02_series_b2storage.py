@@ -51,7 +51,7 @@ class SeriesB2StorageManager:
         self.accounts = accounts
         self.proxy_base = proxy_base.rstrip("/")
         self.auth_cache: Dict[int, Dict[str, Any]] = {}
-        self.timeout = httpx.Timeout(30.0, connect=8.0)
+        self.timeout = httpx.Timeout(60.0, connect=8.0)
         self.current_rr_index = 0
 
     def authorize_account(self, acc_index: int) -> Optional[Dict[str, Any]]:
