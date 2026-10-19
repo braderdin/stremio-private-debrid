@@ -71,7 +71,7 @@ jobs:
         run: |
           python live_engine_v3/X07_b2_storage_guard.py \
             --min-free-gb 5.0 \
-            --safe-cap-gb 8.0
+            --safe-cap-gb 9.0
 
       - name: 7. Laksanakan Enjin Runner X04
         env:

@@ -9,8 +9,8 @@
 # 3. Penjagaan Integriti Data (Zero Orphan):
 #    - Padam fail fizikal di B2 dahulu.
 #    - Padam metadata di Redis Shard hanya selepas B2 mengesahkan fail telah tiada.
-# 4. Pelupusan Berperingkat Global LRU sehingga baki ruang selamat (8.0 GB had)
-#    mempunyai ruang penimbal sekurang-kurangnya 3.5 GB - 8.0 GB untuk fail baharu.
+# 4. Pelupusan Berperingkat Global LRU sehingga baki ruang selamat (9.0 GB had)
+#    mempunyai ruang penimbal sekurang-kurangnya 3.5 GB - 9.0 GB untuk fail baharu.
 # 5. Jeda Masa Bertenang (Cooling-off) untuk membenarkan B2 API mengira semula Cap.
 # ==============================================================================
 
@@ -182,7 +182,7 @@ def safe_evict_oldest_stream(target_meta: Dict[str, Any]) -> bool:
 # ------------------------------------------------------------------------------
 def run_storage_guard(
     required_free_gb: float = 3.5,
-    safe_cap_gb: float = 8.0,
+    safe_cap_gb: float = 9.0,
     max_evictions: int = 15
 ) -> bool:
     safe_cap_bytes = int(safe_cap_gb * 1024**3)
@@ -299,7 +299,7 @@ def run_storage_guard(
 def main():
     parser = argparse.ArgumentParser(description="V3 B2 Storage Pre-Flight Guard (X07)")
     parser.add_argument("--min-free-gb", type=float, default=3.5, help="Ruang bebas minimum diperlukan (Lalai: 3.5 GB)")
-    parser.add_argument("--safe-cap-gb", type=float, default=8.0, help="Had siling selamat per akaun (Lalai: 8.0 GB)")
+    parser.add_argument("--safe-cap-gb", type=float, default=9.0, help="Had siling selamat per akaun (Lalai: 9.0 GB)")
     parser.add_argument("--max-evict", type=int, default=15, help="Had maksimum fail dipadam dalam satu sesi (Lalai: 15)")
     args = parser.parse_args()
 
