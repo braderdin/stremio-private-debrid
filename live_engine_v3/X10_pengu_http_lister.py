@@ -3,14 +3,11 @@
 # PROJEK: STREMIO PRIVATE DEBRID V3 - DIRECT HTTP STREAM LISTER (ENGINE SEBENAR)
 # LOKASI: /home/braderdin/stremio-private-debrid/live_engine_v3/X10_pengu_http_lister.py
 #
-# CIRI-CIRI UTAMA:
-# 1. Bersyarat Pintar: Aktif hanya jika gabungan (X03 + X06 + X09) memulangkan < 20 senarai sah.
-# 2. Had Tambahan: Menambah maksimum sehingga 40 senarai strim unik daripada PenguPlay.
-# 3. Penapis Kualiti Mutlak: 360p dan 480p disekat mutlak. Hanya 1080p, 720p, 2K, 4K dibenarkan.
-# 4. Pengecaman Format Pintar:
-#    - MP4 Terus -> Dilabel 'MP4' (untuk muat turun aria2c 16-thread).
-#    - DASH / HLS -> Dilabel 'DASH' / 'HLS' (untuk muat turun yt-dlp).
-# 5. Keserasian Skema Penuh: Menjana 40-hex pseudo-hash unik bagi setiap URL strim.
+# CIRI TERKINI:
+# 1. Pengecaman Tajuk Cinemeta: Menjana nama filem rasmi automatik (cth: Masaan (2015)).
+# 2. Pengecaman Punca Provider: Membezakan sumber (cth: 2Peckle vs MovieBox).
+# 3. Penapis Kualiti Mutlak: 360p & 480p disekat. Hanya 1080p, 720p, 2K, 4K dibenarkan.
+# 4. Keserasian Skema Redis: Pseudo-hash 40-karakter unik berasaskan URL penstriman.
 # ==============================================================================
 
 import re
@@ -55,10 +52,29 @@ PENGU_BASE_URL = f"https://pengu.uk/%7B%22auth_token%22%3A%22{PENGU_AUTH_TOKEN}%
 
 
 # ------------------------------------------------------------------------------
-# 2. PEMBANTU KUALITI & FORMAT
+# 2. PEMBANTU KUALITI, METADATA & FORMAT
 # ------------------------------------------------------------------------------
+def fetch_cinemeta_meta(imdb_id: str, is_series: bool = False) -> Dict[str, str]:
+    """Mengambil tajuk rasmi dan tahun keluaran daripada Cinemeta Stremio."""
+    base_id = imdb_id.split(":")[0]
+    endpoint_type = "series" if is_series else "movie"
+    url = f"https://v3-cinemeta.strem.io/meta/{endpoint_type}/{base_id}.json"
+    meta = {"title": base_id, "year": ""}
+    try:
+        resp = requests.get(url, impersonate="chrome120", timeout=8)
+        if resp.status_code == 200:
+            data = resp.json().get("meta", {})
+            name = data.get("name", "")
+            year = str(data.get("year", ""))
+            if name:
+                meta = {"title": name, "year": year}
+    except Exception:
+        pass
+    return meta
+
+
 def detect_and_validate_quality(raw_text: str) -> Optional[str]:
-    """Menolak resolusi rendah (360p, 480p, SD). Hanya lulus 720p ke atas."""
+    """Menolak resolusi rendah (360p, 480p, SD). Hanya meluluskan 720p ke atas."""
     t = raw_text.lower()
     if any(q in t for q in ["360p", "480p", "sd"]):
         return None
@@ -84,11 +100,23 @@ def parse_size_bytes(title_str: str) -> int:
         if unit == "GB":
             return int(val * 1024**3)
         return int(val * 1024**2)
-    return int(1.8 * 1024**3)  # Anggaran purata selamat (1.8 GB)
+    return int(1.8 * 1024**3)
 
 
-def fetch_pengu_streams(target_id: str, is_series: bool = False) -> List[Dict[str, Any]]:
-    """Mengekstrak strim HTTP terus daripada PenguPlay."""
+def extract_provider_source(name_field: str, title_field: str) -> str:
+    """Mengekstrak nama punca pelepasan (cth: 2Peckle, MovieBox, MoviesDrives)."""
+    src_match = re.search(r"Source:\s*([\w\-]+)", title_field, re.IGNORECASE)
+    if src_match:
+        return src_match.group(1)
+
+    lines = [l.strip() for l in name_field.split("\n") if l.strip()]
+    if len(lines) >= 3:
+        return lines[-1]
+    return "MovieBox"
+
+
+def fetch_pengu_streams(target_id: str, is_series: bool = False, display_title: str = "") -> List[Dict[str, Any]]:
+    """Mengekstrak strim HTTP terus daripada PenguPlay dengan format nama lengkap."""
     endpoint_type = "series" if is_series else "movie"
     url = f"{PENGU_BASE_URL}/stream/{endpoint_type}/{target_id}.json"
     results = []
@@ -121,22 +149,25 @@ def fetch_pengu_streams(target_id: str, is_series: bool = False) -> List[Dict[st
 
             seen_urls.add(stream_url)
 
-            # Tentukan jenis protokol untuk enjin muat turun (aria2c vs yt-dlp)
+            # Tentukan jenis protokol untuk runner
             stream_format = "MP4"
             if ".m3u8" in stream_url or "hls" in full_desc.lower():
                 stream_format = "HLS"
             elif ".mpd" in stream_url or "dash" in full_desc.lower():
                 stream_format = "DASH"
 
-            # Jana 40-hex pseudo-hash unik berasaskan URL untuk rujukan Runner X04/X11
+            provider = extract_provider_source(name_field, title_field)
             pseudo_hash = hashlib.sha1(stream_url.encode("utf-8")).hexdigest()
             size_bytes = parse_size_bytes(title_field)
-            clean_name = f"[{quality}] {title_field.replace(chr(10), ' • ')} [{stream_format}] [PenguPlay]"
+
+            # Format nama pelepasan yang kemas dan bermaklumat di Stremio
+            movie_tag = display_title or target_id
+            clean_name = f"{movie_tag} [{quality}] [{stream_format}] [{provider}] [PenguPlay]"
 
             results.append({
                 "name": clean_name,
                 "info_hash": pseudo_hash,
-                "seeders": 999,  # Penunjuk sambungan pelayan terus (HTTP Fast Track)
+                "seeders": 999,
                 "size": size_bytes,
                 "quality": quality,
                 "source": "PenguPlay",
@@ -159,14 +190,13 @@ def process_pengu_http_fallback(raw_imdb_id: str, fallback_title: str = "") -> b
     is_series = ":" in target_id
     base_id = target_id.split(":")[0] if is_series else target_id
 
-    # 1. Semak Senarai Semasa di Redis (daripada X03, X06, X09)
+    # 1. Semak Senarai Semasa di Redis
     existing_list = db_v2.get_torrent_list(target_id) or []
     valid_existing = [
         t for t in existing_list
         if int(t.get("seeders", 0)) >= 2 or t.get("stream_type") == "http"
     ]
 
-    # Kriteria: Jika senarai gabungan sedia ada sudah >= 20, langkau X10
     if len(valid_existing) >= 20:
         console.print(
             f"[bold green]✅ Senarai mencukupi ({len(valid_existing)} pautan sah/seeder). "
@@ -174,23 +204,32 @@ def process_pengu_http_fallback(raw_imdb_id: str, fallback_title: str = "") -> b
         )
         return True
 
+    # 2. Dapatkan Tajuk Paparan Rasmi
+    meta = fetch_cinemeta_meta(base_id, is_series=is_series)
+    movie_name = meta.get("title")
+    if not movie_name or movie_name.startswith("tt"):
+        movie_name = fallback_title if fallback_title and not fallback_title.startswith("tt") else base_id
+
+    year = meta.get("year", "")
+    display_title = f"{movie_name} ({year})" if year and year not in movie_name else movie_name
+
     console.print(Panel.fit(
         f"[bold yellow]🐧 AKTIVASI ENJIN STRIM TERUS HTTP PENGUPLAY (X10)[/bold yellow]\n"
         f"Status: [red]Senarai P2P sedia ada hanya {len(valid_existing)} pilihan (< 20)[/red]\n"
-        f"ID Sasaran: [bold cyan]{target_id}[/bold cyan] | Kualiti: [green]1080p, 720p, 2K, 4K[/green]\n"
-        f"Had Tambahan: [green]Maksimum 40 strim HTTP baharu[/green]",
+        f"Tajuk Filem: [bold white]{display_title}[/bold white] | ID: [bold cyan]{target_id}[/bold cyan]\n"
+        f"Kualiti: [green]1080p, 720p, 2K, 4K[/green] | Had: [green]Maksimum 40 strim baharu[/green]",
         border_style="yellow",
     ))
 
-    # 2. Ambil Strim Terus daripada PenguPlay
-    http_streams = fetch_pengu_streams(target_id, is_series=is_series)
-    console.print(f"[cyan]📦 Ditemui daripada PenguPlay:[/cyan] {len(http_streams)} strim sah (360p & 480p ditolak)")
+    # 3. Ambil Strim Terus daripada PenguPlay dengan Tajuk Lengkap
+    http_streams = fetch_pengu_streams(target_id, is_series=is_series, display_title=display_title)
+    console.print(f"[cyan]📦 Ditemui daripada PenguPlay:[/cyan] {len(http_streams)} strim sah")
 
     if not http_streams:
         console.print("[dim yellow]⚠️ Tiada strim HTTP tambahan ditemui di PenguPlay.[/dim yellow]")
         return True
 
-    # 3. Hadkan Maksimum 40 Strim Baharu dari X10
+    # 4. Hadkan Maksimum 40 Strim Baharu
     seen_hashes = {t["info_hash"] for t in existing_list}
     new_to_add = []
 
@@ -203,8 +242,6 @@ def process_pengu_http_fallback(raw_imdb_id: str, fallback_title: str = "") -> b
 
     console.print(f"[bold cyan]➕ Bersedia menambah {len(new_to_add)} strim HTTP unik ke Redis.[/bold cyan]")
 
-    # 4. Penggabungan & Pengisihan Pintar
-    # Strim HTTP PenguPlay (999 seeds) dan fail zon emas (1.0GB - 4.5GB) diletakkan di atas
     def sort_key(it):
         s_type = 1 if it.get("stream_type") == "http" else 0
         sz = it.get("size", 0)
@@ -217,11 +254,11 @@ def process_pengu_http_fallback(raw_imdb_id: str, fallback_title: str = "") -> b
     combined_list.sort(key=sort_key, reverse=True)
     final_list = combined_list[:60]
 
-    # 5. Simpan ke Redis Sharded V3 (TTL 24 Jam)
+    # 5. Simpan ke Redis Sharded V3
     saved = db_v2.save_torrent_list(target_id, final_list, ttl_seconds=86400)
     if saved:
         table = Table(
-            title=f"📋 Senarai Seeder & HTTP Dikemas Kini: {target_id} ({len(final_list)} Pilihan)",
+            title=f"📋 Senarai Seeder & HTTP Dikemas Kini: {display_title} ({len(final_list)} Pilihan)",
             border_style="yellow"
         )
         table.add_column("No", justify="center", style="cyan", width=4)
@@ -254,7 +291,7 @@ def process_pengu_http_fallback(raw_imdb_id: str, fallback_title: str = "") -> b
 
 def main():
     parser = argparse.ArgumentParser(description="V3 Direct HTTP Stream Fallback Lister (X10)")
-    parser.add_argument("--imdb", required=True, help="Target IMDb ID (cth: tt5312232 atau tt0944947:1:1)")
+    parser.add_argument("--imdb", required=True, help="Target IMDb ID (cth: tt4635372)")
     parser.add_argument("--title", default="", help="Tajuk pilihan/sandaran media")
     args = parser.parse_args()
 
