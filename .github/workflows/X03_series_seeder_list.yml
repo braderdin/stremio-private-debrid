@@ -89,18 +89,6 @@ jobs:
             --title "${{ inputs.title }}"
 
       # ========================================================================
-      # STEP 7b: ENJIN STRIM TERUS HTTP PENGUPLAY X10 (AKTIF JIKA SENARAI < 20)
-      # ========================================================================
-      - name: 7b. Laksanakan Enjin Strim Terus HTTP X10_pengu_http_lister.py
-        continue-on-error: true
-        env:
-          REDIS_ACCOUNTS_JSON: ${{ secrets.REDIS_ACCOUNTS_JSON }}
-        run: |
-          python live_engine_v3/X10_pengu_http_lister.py \
-            --imdb "${{ inputs.imdb_id }}" \
-            --title "${{ inputs.title }}"
-
-      # ========================================================================
       # STEP 8: HANTAR NOTIFIKASI KE TELEGRAM (SENTIASA DIJALANKAN)
       # ========================================================================
       - name: 8. Hantar Notifikasi Senarai Seeder ke Telegram

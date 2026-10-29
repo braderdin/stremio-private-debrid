@@ -13,6 +13,7 @@
 # 4. Pengecaman Provider Asal: 2Peckle, MovieBox, dsb.
 # ==============================================================================
 
+import os
 import re
 import sys
 import json
@@ -49,7 +50,8 @@ except Exception as e:
     console.print(f"[bold red]❌ Gagal mengimport modul X01_series_redis: {e}[/bold red]")
     sys.exit(1)
 
-PENGU_AUTH_TOKEN = "GwjNukzuTU_1cw6E2zcTgrxhyTYqmBDFhcUFgmQmDr0"
+# Baca daripada env (PENGU_PLAY_TOKEN), sandaran kepada token sedia ada jika tiada
+PENGU_AUTH_TOKEN = (os.getenv("PENGU_PLAY_TOKEN") or "GwjNukzuTU_1cw6E2zcTgrxhyTYqmBDFhcUFgmQmDr0").strip()
 PENGU_BASE_URL = f"https://pengu.uk/%7B%22auth_token%22%3A%22{PENGU_AUTH_TOKEN}%22%7D"
 
 
