@@ -52,7 +52,11 @@ jobs:
             https://api.github.com/repos/braderdin/stremio-sub-addon/dispatches \
             -d '{"event_type":"ondemand_scrape","client_payload":{"imdb_id":"${{ inputs.imdb_id }}"}}'
 
+      # ========================================================================
+      # STEP 6: ENJIN UTAMA X03 (continue-on-error DITAMBAH AGAR STEP 7/7a JALAN)
+      # ========================================================================
       - name: 6. Laksanakan Enjin X03_series_seeder_lister.py
+        continue-on-error: true
         env:
           REDIS_ACCOUNTS_JSON: ${{ secrets.REDIS_ACCOUNTS_JSON }}
         run: |
@@ -60,6 +64,9 @@ jobs:
             --imdb "${{ inputs.imdb_id }}" \
             --title "${{ inputs.title }}"
 
+      # ========================================================================
+      # STEP 7: ENJIN MULTI-SOURCE X06
+      # ========================================================================
       - name: 7. Laksanakan Enjin Tambahan X06_seeder_multisource_lister.py (Multi-Source)
         continue-on-error: true
         env:
@@ -69,6 +76,21 @@ jobs:
             --imdb "${{ inputs.imdb_id }}" \
             --title "${{ inputs.title }}"
 
+      # ========================================================================
+      # STEP 7a: ENJIN SANDARAN FILEM INDIA X09 (AKTIF JIKA SEEDER < 10)
+      # ========================================================================
+      - name: 7a. Laksanakan Enjin Sandaran Filem India X09_indian_movie_seeder_lister.py
+        continue-on-error: true
+        env:
+          REDIS_ACCOUNTS_JSON: ${{ secrets.REDIS_ACCOUNTS_JSON }}
+        run: |
+          python live_engine_v3/X09_indian_movie_seeder_lister.py \
+            --imdb "${{ inputs.imdb_id }}" \
+            --title "${{ inputs.title }}"
+
+      # ========================================================================
+      # STEP 8: HANTAR NOTIFIKASI KE TELEGRAM (SENTIASA DIJALANKAN)
+      # ========================================================================
       - name: 8. Hantar Notifikasi Senarai Seeder ke Telegram
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -80,6 +102,9 @@ jobs:
             --imdb "${{ inputs.imdb_id }}" \
             --title "${{ inputs.title }}"
 
+      # ========================================================================
+      # STEP 9: HANTAR NOTIFIKASI RALAT KE TELEGRAM (JIKA STEP 8 GAGAL)
+      # ========================================================================
       - name: 9. Hantar Notifikasi Ralat ke Telegram
         if: failure()
         env:
