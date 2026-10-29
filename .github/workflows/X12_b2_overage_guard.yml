@@ -1,0 +1,58 @@
+name: X12 B2 Storage Overage Auto-Guard
+
+on:
+  schedule:
+    # Berjalan secara automatik setiap 3 hari sekali pada jam 03:00 UTC (11:00 AM MYT)
+    - cron: '0 3 */3 * *'
+  workflow_dispatch:
+    inputs:
+      max_cap_gb:
+        description: "Had siling maksimum satu akaun B2 (GB)"
+        required: false
+        default: "10.0"
+        type: string
+      max_delete:
+        description: "Maksimum fail paling lama dipadamkan per akaun jika melebihi had"
+        required: false
+        default: "2"
+        type: string
+
+concurrency:
+  group: b2-overage-guard
+  cancel-in-progress: false
+
+jobs:
+  inspect-and-guard-overage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: 1. Nyahsekat DNS Runner
+        run: |
+          sudo sed -i '1inameserver 1.1.1.1\nnameserver 8.8.8.8' /etc/resolv.conf
+
+      - name: 2. Checkout Repositori
+        uses: actions/checkout@v7
+
+      - name: 3. Pasang Persekitaran Python 3.11
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: 4. Pasang Keperluan Pustaka Python & Rclone
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements-runner.txt
+          curl https://rclone.org/install.sh | sudo bash
+
+      - name: 5. Laksanakan X12 B2 Overage Auto-Guard
+        env:
+          REDIS_ACCOUNTS_JSON: ${{ secrets.REDIS_ACCOUNTS_JSON }}
+          B2_ACCOUNTS_JSON: ${{ secrets.B2_ACCOUNTS_JSON }}
+        run: |
+          MAX_CAP="${{ inputs.max_cap_gb || '10.0' }}"
+          MAX_DEL="${{ inputs.max_delete || '2' }}"
+          python live_engine_v3/X12_b2_overage_guard.py \
+            --max-cap-gb "$MAX_CAP" \
+            --max-delete "$MAX_DEL"
