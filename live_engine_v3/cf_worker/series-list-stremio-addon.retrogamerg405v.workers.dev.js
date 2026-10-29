@@ -1,6 +1,6 @@
 /**
  * ==============================================================================
- * PROJEK: STREMIO PRIVATE DEBRID V3 - SERIES & MOVIE SMART PICKER
+ * PROJEK: STREMIO PRIVATE DEBRID V3 - SERIES & MOVIE SMART PICKER (P2P EXCLUSIVE)
  * WORKER: series-list-stremio-addon.retrogamerg405v.workers.dev
  * CIRI UTAMA:
  * 1. Mendukung Penuh Serial TV (tt...:S:E) & Film (tt...) tanpa bentrok.
@@ -9,6 +9,7 @@
  * 4. Mendukung Parameter file_idx untuk unduhan episode tertentu dalam Season Pack.
  * 5. Multi-Stream B2 Display & Penyaringan Hash Aktif.
  * 6. Memanggil Workflow X03_series_seeder_list.yml & X04_series_download.yml.
+ * 7. PENGASINGAN MUTLAK: Menapis & menyekat sebarang entri HTTP / PenguPlay.
  * ==============================================================================
  */
 
@@ -154,6 +155,10 @@ export default {
         }
 
         for (const s of readyStreams) {
+          // Sekat rekod siap jika berasal daripada muat turun HTTP/PenguPlay lama
+          if (s.title && s.title.includes("PenguPlay")) continue;
+          if (s.file_name && s.file_name.includes("PenguPlay")) continue;
+
           if (s.info_hash) {
             activeHashes.add(s.info_hash.toLowerCase().trim());
           }
@@ -175,6 +180,9 @@ export default {
         // BAGIAN B: Tampilkan daftar torrent yang tersedia (Saring info_hash yang sudah ada di B2)
         if (Array.isArray(cachedList) && cachedList.length > 0) {
           for (const item of cachedList) {
+            // Sekat mutlak sebarang pautan HTTP/PenguPlay agar addon ini 100% khas P2P Torrent sahaja
+            if (item.stream_type === "http" || item.source === "PenguPlay" || (item.name && item.name.includes("PenguPlay"))) continue;
+
             const itemHash = (item.info_hash || "").toLowerCase().trim();
             if (itemHash && activeHashes.has(itemHash)) continue;
 
