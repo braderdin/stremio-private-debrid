@@ -197,7 +197,7 @@ def process_pengu_http_fallback(raw_imdb_id: str, fallback_title: str = "") -> b
         if int(t.get("seeders", 0)) >= 2 or t.get("stream_type") == "http"
     ]
 
-    if len(valid_existing) >= 20:
+    if len(valid_existing) >= 60:
         console.print(
             f"[bold green]✅ Senarai mencukupi ({len(valid_existing)} pautan sah/seeder). "
             f"X10 PenguPlay dilangkau tanpa sebarang perubahan.[/bold green]"
@@ -215,7 +215,7 @@ def process_pengu_http_fallback(raw_imdb_id: str, fallback_title: str = "") -> b
 
     console.print(Panel.fit(
         f"[bold yellow]🐧 AKTIVASI ENJIN STRIM TERUS HTTP PENGUPLAY (X10)[/bold yellow]\n"
-        f"Status: [red]Senarai P2P sedia ada hanya {len(valid_existing)} pilihan (< 20)[/red]\n"
+        f"Status: [red]Senarai P2P sedia ada hanya {len(valid_existing)} pilihan (< 60)[/red]\n"
         f"Tajuk Filem: [bold white]{display_title}[/bold white] | ID: [bold cyan]{target_id}[/bold cyan]\n"
         f"Kualiti: [green]1080p, 720p, 2K, 4K[/green] | Had: [green]Maksimum 40 strim baharu[/green]",
         border_style="yellow",
