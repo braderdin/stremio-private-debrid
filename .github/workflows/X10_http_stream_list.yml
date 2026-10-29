@@ -23,9 +23,10 @@ jobs:
     timeout-minutes: 25
 
     steps:
-      - name: 1. Nyahsekat DNS Runner
+      - name: 1. Nyahsekat DNS Runner (Guna Cloudflare 1.1.1.1 & Google 8.8.8.8)
         run: |
           sudo sed -i '1inameserver 1.1.1.1\nnameserver 8.8.8.8' /etc/resolv.conf
+          head -n 4 /etc/resolv.conf
 
       - name: 2. Checkout Repositori
         uses: actions/checkout@v7
