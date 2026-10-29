@@ -53,7 +53,7 @@ jobs:
             -d '{"event_type":"ondemand_scrape","client_payload":{"imdb_id":"${{ inputs.imdb_id }}"}}'
 
       # ========================================================================
-      # STEP 6: ENJIN UTAMA X03 (continue-on-error DITAMBAH AGAR STEP 7/7a JALAN)
+      # STEP 6: ENJIN UTAMA X03 (continue-on-error AGAR STEP 7/7a/7b DAPAT JALAN)
       # ========================================================================
       - name: 6. Laksanakan Enjin X03_series_seeder_lister.py
         continue-on-error: true
@@ -89,6 +89,18 @@ jobs:
             --title "${{ inputs.title }}"
 
       # ========================================================================
+      # STEP 7b: ENJIN STRIM TERUS HTTP PENGUPLAY X10 (AKTIF JIKA SENARAI < 20)
+      # ========================================================================
+      - name: 7b. Laksanakan Enjin Strim Terus HTTP X10_pengu_http_lister.py
+        continue-on-error: true
+        env:
+          REDIS_ACCOUNTS_JSON: ${{ secrets.REDIS_ACCOUNTS_JSON }}
+        run: |
+          python live_engine_v3/X10_pengu_http_lister.py \
+            --imdb "${{ inputs.imdb_id }}" \
+            --title "${{ inputs.title }}"
+
+      # ========================================================================
       # STEP 8: HANTAR NOTIFIKASI KE TELEGRAM (SENTIASA DIJALANKAN)
       # ========================================================================
       - name: 8. Hantar Notifikasi Senarai Seeder ke Telegram
@@ -116,4 +128,4 @@ jobs:
             --imdb "${{ inputs.imdb_id }}" \
             --title "${{ inputs.title }}" \
             --workflow "X03_series_seeder_list.yml" \
-            --error "Gagal mengekstrak atau menyimpan senarai seeder siri ke Redis."
+            --error "Gagal mengekstrak atau menyimpan senarai seeder/strim ke Redis."

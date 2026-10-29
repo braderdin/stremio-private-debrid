@@ -53,10 +53,10 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
-      - name: 5. Pasang Perkakas aria2c & rclone
+      - name: 5. Pasang Perkakas aria2c, rclone & ffmpeg
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y aria2 curl
+          sudo apt-get install -y aria2 curl ffmpeg
           curl https://rclone.org/install.sh | sudo bash
 
       - name: 6. Pasang Keperluan Pustaka Python
@@ -83,7 +83,25 @@ jobs:
             --safe-cap-gb 9.0 \
             --max-evict 15
 
-      - name: 7. Laksanakan Enjin Runner X04
+      # ========================================================================
+      # STEP 6d: PENGESANAN PINTAR JENIS PAUTAN (TORRENT VS DIRECT HTTP PENGUPLAY)
+      # ========================================================================
+      - name: 6d. Pengesanan Jenis Pautan (Torrent vs Direct HTTP)
+        id: detect_stream
+        env:
+          REDIS_ACCOUNTS_JSON: ${{ secrets.REDIS_ACCOUNTS_JSON }}
+        run: |
+          python live_engine_v3/X11_http_runner_core.py \
+            --detect \
+            --hash "${{ inputs.info_hash }}" \
+            --imdb "${{ inputs.imdb_id }}"
+
+      # ========================================================================
+      # STEP 7: ENJIN UTAMA TORRENT X04 (AKTIF HANYA JIKA BUKAN HTTP)
+      # ========================================================================
+      - name: 7. Laksanakan Enjin Runner X04 (P2P BitTorrent)
+        id: run_x04
+        if: steps.detect_stream.outputs.stream_type != 'http'
         env:
           REDIS_ACCOUNTS_JSON: ${{ secrets.REDIS_ACCOUNTS_JSON }}
           B2_ACCOUNTS_JSON: ${{ secrets.B2_ACCOUNTS_JSON }}
@@ -95,7 +113,27 @@ jobs:
             --idx "${{ inputs.file_idx }}" \
             --title "${{ inputs.title }}"
 
+      # ========================================================================
+      # STEP 7a: ENJIN STRIM TERUS HTTP X11 (AKTIF HANYA JIKA PENGUPLAY HTTP)
+      # ========================================================================
+      - name: 7a. Laksanakan Enjin Runner X11 (Direct HTTP MP4 & DASH/HLS)
+        id: run_x11
+        if: steps.detect_stream.outputs.stream_type == 'http'
+        env:
+          REDIS_ACCOUNTS_JSON: ${{ secrets.REDIS_ACCOUNTS_JSON }}
+          B2_ACCOUNTS_JSON: ${{ secrets.B2_ACCOUNTS_JSON }}
+          CF_WORKER_B2_PROXY_STORAGE: "https://b2-proxy-aria-engine.retrogamerg405v.workers.dev"
+        run: |
+          python live_engine_v3/X11_http_runner_core.py \
+            --hash "${{ inputs.info_hash }}" \
+            --imdb "${{ inputs.imdb_id }}" \
+            --title "${{ inputs.title }}"
+
+      # ========================================================================
+      # STEP 8: HANTAR NOTIFIKASI KE TELEGRAM (JIKA X04 ATAU X11 BERJAYA)
+      # ========================================================================
       - name: 8. Hantar Notifikasi Selesai Muat Turun ke Telegram
+        if: always() && (steps.run_x04.outcome == 'success' || steps.run_x11.outcome == 'success')
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -107,6 +145,9 @@ jobs:
             --hash "${{ inputs.info_hash }}" \
             --title "${{ inputs.title }}"
 
+      # ========================================================================
+      # STEP 9: HANTAR NOTIFIKASI RALAT KE TELEGRAM (JIKA SALAH SATU GAGAL)
+      # ========================================================================
       - name: 9. Hantar Notifikasi Ralat ke Telegram
         if: failure()
         env:
@@ -118,4 +159,4 @@ jobs:
             --imdb "${{ inputs.imdb_id }}" \
             --title "${{ inputs.title }}" \
             --workflow "X04_series_download.yml" \
-            --error "Proses aria2c muat turun siri atau pemindahan ke storan B2 gagal."
+            --error "Proses muat turun (X04/X11) atau pemindahan ke storan B2 gagal."
