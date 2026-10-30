@@ -2,8 +2,8 @@ name: X12 B2 Storage Overage Auto-Guard
 
 on:
   schedule:
-    # Berjalan secara automatik setiap 3 hari sekali pada jam 03:00 UTC (11:00 AM MYT)
-    - cron: '0 3 */3 * *'
+    # Berjalan secara automatik setiap 3 hari sekali pada 3:30 AM MYT)
+    - cron: '30 19 */3 * *'
   workflow_dispatch:
     inputs:
       max_cap_gb:
