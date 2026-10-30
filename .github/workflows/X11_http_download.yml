@@ -63,7 +63,7 @@ jobs:
           B2_ACCOUNTS_JSON: ${{ secrets.B2_ACCOUNTS_JSON }}
         run: |
           python live_engine_v3/X07_b2_storage_guard.py \
-            --min-free-gb 5.0 \
+            --min-free-gb 7.0 \
             --safe-cap-gb 9.0
 
       - name: 6c. Pengesahan Penuh & Double-Check Storan B2 (X08 Smart Guard)
@@ -72,7 +72,7 @@ jobs:
           B2_ACCOUNTS_JSON: ${{ secrets.B2_ACCOUNTS_JSON }}
         run: |
           python live_engine_v3/X08_b2_smart_storage_guard.py \
-            --min-free-gb 5.0 \
+            --min-free-gb 7.0 \
             --safe-cap-gb 9.0 \
             --max-evict 15
 
