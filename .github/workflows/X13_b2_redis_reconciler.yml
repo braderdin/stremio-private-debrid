@@ -1,0 +1,52 @@
+name: X13 B2 & Redis Weekly Reconciler
+
+on:
+  schedule:
+    # Ahad, 3:30 AM Waktu Malaysia (19:30 UTC Sabtu)
+    - cron: '30 19 * * 6'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Semak sahaja tanpa pemadaman (true / false)"
+        required: false
+        default: "false"
+        type: boolean
+
+concurrency:
+  group: b2-redis-reconciler
+  cancel-in-progress: false
+
+jobs:
+  reconcile-b2-redis:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: 1. Nyahsekat DNS Runner
+        run: |
+          sudo sed -i '1inameserver 1.1.1.1\nnameserver 8.8.8.8' /etc/resolv.conf
+
+      - name: 2. Checkout Repositori
+        uses: actions/checkout@v7
+
+      - name: 3. Pasang Persekitaran Python 3.11
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: 4. Pasang Keperluan Pustaka Python
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements-runner.txt
+
+      - name: 5. Laksanakan X13 B2 & Redis Reconciler
+        env:
+          REDIS_ACCOUNTS_JSON: ${{ secrets.REDIS_ACCOUNTS_JSON }}
+          B2_ACCOUNTS_JSON: ${{ secrets.B2_ACCOUNTS_JSON }}
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            python live_engine_v3/X13_b2_redis_reconciler.py --dry-run
+          else
+            python live_engine_v3/X13_b2_redis_reconciler.py
+          fi
