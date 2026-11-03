@@ -63,7 +63,7 @@ jobs:
 
       - name: 7. Sediakan Cache & Binari Pelayar Camoufox
         id: cache-camoufox
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/camoufox
           key: camoufox-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
