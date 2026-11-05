@@ -128,7 +128,7 @@ async function fetchB2File(auth, bucketName, filePath, incomingRequest) {
 }
 
 /**
- * Menghurai akaun B2 daripada konfigurasi V1 dan V2
+ * Menghurai akaun B2 daripada konfigurasi V1 sehingga V12 (Menyokong sehingga 200 Akaun)
  */
 function getB2AccountConfig(env, bucketIdentifier) {
   const target = (bucketIdentifier || "").toLowerCase().trim();
@@ -146,6 +146,16 @@ function getB2AccountConfig(env, bucketIdentifier) {
 
     if (env.B2_ACCOUNTS_JSON_V1) combined = combined.concat(parsePart(env.B2_ACCOUNTS_JSON_V1));
     if (env.B2_ACCOUNTS_JSON_V2) combined = combined.concat(parsePart(env.B2_ACCOUNTS_JSON_V2));
+    if (env.B2_ACCOUNTS_JSON_V3) combined = combined.concat(parsePart(env.B2_ACCOUNTS_JSON_V3));
+    if (env.B2_ACCOUNTS_JSON_V4) combined = combined.concat(parsePart(env.B2_ACCOUNTS_JSON_V4));
+    if (env.B2_ACCOUNTS_JSON_V5) combined = combined.concat(parsePart(env.B2_ACCOUNTS_JSON_V5));
+    if (env.B2_ACCOUNTS_JSON_V6) combined = combined.concat(parsePart(env.B2_ACCOUNTS_JSON_V6));
+    if (env.B2_ACCOUNTS_JSON_V7) combined = combined.concat(parsePart(env.B2_ACCOUNTS_JSON_V7));
+    if (env.B2_ACCOUNTS_JSON_V8) combined = combined.concat(parsePart(env.B2_ACCOUNTS_JSON_V8));
+    if (env.B2_ACCOUNTS_JSON_V9) combined = combined.concat(parsePart(env.B2_ACCOUNTS_JSON_V9));
+    if (env.B2_ACCOUNTS_JSON_V10) combined = combined.concat(parsePart(env.B2_ACCOUNTS_JSON_V10));
+    if (env.B2_ACCOUNTS_JSON_V11) combined = combined.concat(parsePart(env.B2_ACCOUNTS_JSON_V11));
+    if (env.B2_ACCOUNTS_JSON_V12) combined = combined.concat(parsePart(env.B2_ACCOUNTS_JSON_V12));
 
     parsedAccountsCache = combined;
   }

@@ -87,6 +87,7 @@ jobs:
           TARGET_WEB_URL: ${{ secrets.TARGET_WEB_URL }}
           REDIS_ACCOUNTS_JSON: ${{ secrets.REDIS_ACCOUNTS_JSON }}
           B2_ACCOUNTS_JSON: ${{ secrets.B2_ACCOUNTS_JSON }}
+          B2_ACCOUNTS_JSON_X1: ${{ secrets.B2_ACCOUNTS_JSON_X1 }}
           TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
           TMDB_READ_TOKEN: ${{ secrets.TMDB_READ_TOKEN }}
           CF_WORKER_B2_PROXY_STORAGE: "https://b2-proxy-aria-engine.retrogamerg405v.workers.dev"

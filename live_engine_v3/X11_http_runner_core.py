@@ -319,7 +319,7 @@ def execute_http_job(info_hash: str, raw_imdb_id: str, raw_title: str):
     file_size = temp_video_file.stat().st_size
     sha256_hash = calculate_sha256(temp_video_file)
 
-    # 4. Agihan Storan B2 (50 Baldi Round-Robin & LRU Eviction dari X02)
+    # 4. Agihan Storan B2 (200 Baldi Round-Robin & LRU Eviction dari X02)
     b2_target = storage.allocate_storage_with_eviction(file_size, db)
     if not b2_target:
       console.print(

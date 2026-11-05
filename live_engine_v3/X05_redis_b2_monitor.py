@@ -3,7 +3,7 @@
 # PROJEK: STREMIO PRIVATE DEBRID - LIVE ENGINE V3
 # FAIL  : X05_redis_b2_monitor.py
 # LOKASI: /home/braderdin/stremio-private-debrid/live_engine_v3/X05_redis_b2_monitor.py
-# FUNGSI: Papan Pemuka Diagnostik Bersepadu Bagi 50 Akaun B2 & 4 Shard Upstash Redis
+# FUNGSI: Papan Pemuka Diagnostik Bersepadu Bagi 200 Akaun B2 & 4 Shard Upstash Redis
 # ==============================================================================
 
 import os
@@ -49,7 +49,7 @@ REDIS_SAFE_DAILY_CMDS = 5000                          # Had selamat lokal: 5,000
 
 
 # ------------------------------------------------------------------------------
-# 2. PENGESAN KUNCI PINTAR (B2_ACC001..050 & UPSTASH_REDIS_001..004)
+# 2. PENGESAN KUNCI PINTAR (B2_ACC001..200 & UPSTASH_REDIS_001..004)
 # ------------------------------------------------------------------------------
 def clean_val(val: Optional[str]) -> str:
     """Membersihkan ruang kosong dan tanda petik ganda/tunggal."""
@@ -59,17 +59,17 @@ def clean_val(val: Optional[str]) -> str:
 
 
 def load_environment_credentials() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """Mengekstrak akaun B2 (1-50) dan Upstash Redis (1-4) dari .env.local."""
+    """Mengekstrak akaun B2 (1-200) dan Upstash Redis (1-4) dari .env.local."""
     env_vars = {}
     if ENV_LOCAL_PATH.exists():
         env_vars = dotenv_values(str(ENV_LOCAL_PATH))
     else:
         env_vars = dict(os.environ)
 
-    # A. Ekstrak Akaun Backblaze B2 (Imbas dari 001 hingga 050)
+    # A. Ekstrak Akaun Backblaze B2 (Imbas dari 001 hingga 200)
     b2_accounts: List[Dict[str, Any]] = []
 
-    for i in range(1, 51):
+    for i in range(1, 201):
         # Menyokong format 3 digit (ACC001), 2 digit (ACC01) dan 1 digit (ACC1)
         prefixes = [f"B2_ACC{i:03d}_", f"B2_ACC{i:02d}_", f"B2_ACC{i}_"]
         
@@ -371,7 +371,7 @@ def run_monitor(check_b2: bool = True, check_redis: bool = True):
     console.print(Panel.fit(
         f"[bold cyan]⚡ STREMIO PRIVATE DEBRID & SUB-ADDON INFRASTRUCTURE MONITOR[/bold cyan]\n"
         f"Laluan Fail Rahsia: [yellow]{ENV_LOCAL_PATH}[/yellow]\n"
-        f"Pemeriksaan Aktif : [bold magenta]{'B2 (Sedia Sehingga 50) & Redis (4 Shard)' if (check_b2 and check_redis) else ('B2 Sahaja' if check_b2 else 'Redis Sahaja')}[/bold magenta]",
+        f"Pemeriksaan Aktif : [bold magenta]{'B2 (Sedia Sehingga 200) & Redis (4 Shard)' if (check_b2 and check_redis) else ('B2 Sahaja' if check_b2 else 'Redis Sahaja')}[/bold magenta]",
         border_style="cyan"
     ))
 
@@ -383,7 +383,7 @@ def run_monitor(check_b2: bool = True, check_redis: bool = True):
     if check_b2:
         console.print(f"\n[bold yellow]🔍 Mengesan {len(b2_accs)} Akaun Backblaze B2 di .env.local...[/bold yellow]")
         if not b2_accs:
-            console.print("[dim red]⚠️ Tiada format kunci B2_ACC001..050 dikesan di .env.local![/dim red]")
+            console.print("[dim red]⚠️ Tiada format kunci B2_ACC001..200 dikesan di .env.local![/dim red]")
         else:
             b2_results = []
             total_b2_files = 0

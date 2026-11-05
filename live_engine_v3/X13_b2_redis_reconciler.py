@@ -4,7 +4,7 @@
 # LOKASI: /home/braderdin/stremio-private-debrid/live_engine_v3/X13_b2_redis_reconciler.py
 #
 # FUNGSI UTAMA:
-# 1. Menyelaraskan secara dwiarah antara 4 Shard Upstash Redis & 50 Baldi B2.
+# 1. Menyelaraskan secara dwiarah antara 4 Shard Upstash Redis & 200 Baldi B2.
 # 2. Dijalankan seminggu sekali secara berjadual (Cron) melalui GitHub Actions.
 # 3. Membersihkan Redis Ghost: Jika rekod ada di Redis tetapi fail tiada di B2,
 #    kemaskini atau padam kunci Redis agar tiada pautan 404 di Stremio.
@@ -55,20 +55,28 @@ except Exception as e:
 
 
 # ------------------------------------------------------------------------------
-# 2. PENGESANAN AKAUN B2 DINAMIK
+# 2. PENGESANAN AKAUN B2 DINAMIK (MENYOKONG 200 AKAUN)
 # ------------------------------------------------------------------------------
 def load_dynamic_b2_accounts() -> List[Dict[str, Any]]:
-  raw_json = os.environ.get("B2_ACCOUNTS_JSON", "").strip() or os.environ.get(
-      "B2_MULTI_ACCOUNT_JSON", ""
-  ).strip()
-  if raw_json:
-    try:
-      parsed = json.loads(raw_json)
-      if isinstance(parsed, list) and parsed:
-        parsed.sort(key=lambda x: x.get("index", 0))
-        return parsed
-    except Exception:
-      pass
+  raw_sources = [
+      os.environ.get("B2_ACCOUNTS_JSON", "").strip(),
+      os.environ.get("B2_ACCOUNTS_JSON_X1", "").strip(),
+      os.environ.get("B2_MULTI_ACCOUNT_JSON", "").strip(),
+  ]
+
+  combined_accounts = []
+  for raw_json in raw_sources:
+    if raw_json:
+      try:
+        parsed = json.loads(raw_json)
+        if isinstance(parsed, list):
+          combined_accounts.extend(parsed)
+      except Exception:
+        pass
+
+  if combined_accounts:
+    combined_accounts.sort(key=lambda x: int(x.get("index", 0)))
+    return combined_accounts
 
   if hasattr(_config, "get_b2_accounts"):
     cfg_accs = _config.get_b2_accounts()
@@ -79,7 +87,7 @@ def load_dynamic_b2_accounts() -> List[Dict[str, Any]]:
 
 
 # ------------------------------------------------------------------------------
-# 3. IMBASAN INVENTORI FIZIKAL B2 (50 BALDI)
+# 3. IMBASAN INVENTORI FIZIKAL B2 (200 BALDI)
 # ------------------------------------------------------------------------------
 def fetch_b2_bucket_inventory(
     acc: Dict[str, Any], timeout_sec: float = 30.0
@@ -189,7 +197,7 @@ def scan_all_b2(
   b2_account_info = {}
   b2_files_registry = {}
 
-  with ThreadPoolExecutor(max_workers=10) as executor:
+  with ThreadPoolExecutor(max_workers=15) as executor:
     future_map = {
         executor.submit(fetch_b2_bucket_inventory, acc, 30.0): acc
         for acc in accounts
@@ -210,7 +218,7 @@ def scan_all_b2(
 
 
 # ------------------------------------------------------------------------------
-# 4. IMBASAN METADATA REDIS (4 SHARDS)
+# 4. IMBASAN METADATA REDIS (4 SHARDS - MENDUKUNG DICT & LIST)
 # ------------------------------------------------------------------------------
 def scan_all_redis() -> Dict[str, Dict[str, Any]]:
   redis_keys_registry = {}
@@ -242,6 +250,8 @@ def scan_all_redis() -> Dict[str, Dict[str, Any]]:
         val = json.loads(raw_val) if isinstance(raw_val, str) else raw_val
         if isinstance(val, dict):
           redis_keys_registry[k] = {"shard": shard, "data": val}
+        elif isinstance(val, list):
+          redis_keys_registry[k] = {"shard": shard, "data": {"streams": val}}
     except Exception as e:
       console.print(
           f"[dim red]Ralat imbas shard Redis {shard.get('index')}: {e}[/dim"
@@ -260,23 +270,25 @@ def execute_reconciliation(dry_run: bool = False) -> Dict[str, Any]:
       if dry_run
       else "[bold green]PENGUATKUASAAN AKTIF (Auto-Fix & Purge)[/bold green]"
   )
-  console.print(
-      Panel.fit(
-          "🔄 STREMIO V3: REDIS & B2 RECONCILER (X13 PRODUCTION)\nMod Operasi :"
-          f" {mode_text}\nLiputan     : 4 Shard Upstash Redis vs 50 Baldi"
-          " Backblaze B2\nObjektif    : Menghapuskan 404 Ghost di Redis &"
-          " Memadam Fail Zombie di B2",
-          border_style="cyan",
-      )
-  )
-
   accounts = load_dynamic_b2_accounts()
   if not accounts:
     console.print("[bold red]❌ Tiada akaun B2 dikesan![/bold red]")
     return {"status": "error", "message": "No B2 accounts"}
 
   console.print(
-      "[cyan]⏳ Langkah 1/3: Mengimbas inventori fizikal di 50 baldi Backblaze"
+      Panel.fit(
+          "🔄 STREMIO V3: REDIS & B2 RECONCILER (X13 PRODUCTION)\n"
+          f"Mod Operasi : {mode_text}\n"
+          f"Liputan     : 4 Shard Upstash Redis vs {len(accounts)} Baldi"
+          " Backblaze B2\n"
+          "Objektif    : Menghapuskan 404 Ghost di Redis &"
+          " Memadam Fail Zombie di B2",
+          border_style="cyan",
+      )
+  )
+
+  console.print(
+      f"[cyan]⏳ Langkah 1/3: Mengimbas inventori fizikal di {len(accounts)} baldi Backblaze"
       " B2...[/cyan]"
   )
   b2_acc_info, b2_files = scan_all_b2(accounts)
@@ -299,8 +311,19 @@ def execute_reconciliation(dry_run: bool = False) -> Dict[str, Any]:
       "[cyan]⏳ Langkah 3/3: Melaksanakan cross-referencing dwiarah...[/cyan]"
   )
 
+  # Penampung padanan kalis ralat
+  active_redis_full = set()
+  active_redis_basenames = set()
   redis_ghosts = []
-  active_redis_b2_pairs = set()
+
+  # Normalisasi pencarian B2 fisik
+  b2_physical_lookup = {}
+  for (b_name, f_path) in b2_files.keys():
+    b_clean = b_name.lower().strip()
+    f_clean = f_path.lstrip("/").lower().strip()
+    base_clean = Path(f_clean).name
+    b2_physical_lookup[(b_clean, f_clean)] = (b_name, f_path)
+    b2_physical_lookup[(b_clean, base_clean)] = (b_name, f_path)
 
   for k, item in redis_registry.items():
     shard = item["shard"]
@@ -311,15 +334,31 @@ def execute_reconciliation(dry_run: bool = False) -> Dict[str, Any]:
       streams = [data]
 
     for s in streams:
-      b_name = s.get("b2_bucket", "")
-      f_path = s.get("file_path", "").lstrip("/")
+      b_name = (
+          s.get("b2_bucket")
+          or s.get("bucket_name")
+          or s.get("bucket")
+          or ""
+      ).strip()
+      f_path = (s.get("file_path") or s.get("path") or s.get("file_name") or "").strip().lstrip("/")
 
       if not b_name or not f_path:
         continue
 
-      active_redis_b2_pairs.add((b_name, f_path))
+      b_low = b_name.lower()
+      f_low = f_path.lower()
+      base_low = Path(f_low).name
 
-      if (b_name, f_path) not in b2_files:
+      active_redis_full.add((b_low, f_low))
+      active_redis_basenames.add((b_low, base_low))
+
+      # Semak kewujudan fail di inventori B2
+      found_in_b2 = (
+          (b_low, f_low) in b2_physical_lookup
+          or (b_low, base_low) in b2_physical_lookup
+      )
+
+      if not found_in_b2:
         redis_ghosts.append({
             "key": k,
             "shard": shard,
@@ -332,7 +371,16 @@ def execute_reconciliation(dry_run: bool = False) -> Dict[str, Any]:
 
   b2_zombies = []
   for (b_name, f_path), f_meta in b2_files.items():
-    if (b_name, f_path) not in active_redis_b2_pairs:
+    b_low = b_name.lower().strip()
+    f_low = f_path.lstrip("/").lower().strip()
+    base_low = Path(f_low).name
+
+    is_active = (
+        (b_low, f_low) in active_redis_full
+        or (b_low, base_low) in active_redis_basenames
+    )
+
+    if not is_active:
       b2_zombies.append({
           "bucket": b_name,
           "file_path": f_path,
@@ -409,7 +457,7 @@ def execute_reconciliation(dry_run: bool = False) -> Dict[str, Any]:
   else:
     console.print(
         "[bold green]✅ TIADA B2 ZOMBIE: Tiada fail terbiar tanpa rekod di"
-        " seluruh 50 baldi B2.[/bold green]"
+        f" seluruh {len(accounts)} baldi B2.[/bold green]"
     )
 
   # TINDAKAN PEMBERSIHAN SEBENAR JIKA BUKAN DRY-RUN
@@ -437,7 +485,7 @@ def execute_reconciliation(dry_run: bool = False) -> Dict[str, Any]:
           new_streams = [
               s
               for s in st_list
-              if s.get("file_path", "").lstrip("/") != g["file_path"]
+              if Path(s.get("file_path", "")).name.lower() != Path(g["file_path"]).name.lower()
           ]
           if len(new_streams) == 0:
             db.execute_command(shard, "DEL", k)

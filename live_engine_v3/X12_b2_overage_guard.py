@@ -4,7 +4,7 @@
 # LOKASI: /home/braderdin/stremio-private-debrid/live_engine_v3/X12_b2_overage_guard.py
 #
 # FUNGSI UTAMA:
-# 1. Menjaga 50 Akaun Backblaze B2 supaya TIDAK MELEBIHI 10.0 GB (Bebas Caj Terlebih / Overage).
+# 1. Menjaga 200 Akaun Backblaze B2 supaya TIDAK MELEBIHI 10.0 GB (Bebas Caj Terlebih / Overage).
 # 2. Dijalankan secara berjadual (Setiap 3 Hari Sekali) melalui GitHub Actions atau manual.
 # 3. Jika mana-mana akaun dikesan > 10.0 GB:
 #    - Mengenal pasti fail fizikal tertua berdasarkan uploadTimestamp B2.
@@ -56,20 +56,31 @@ except Exception as e:
 
 
 # ------------------------------------------------------------------------------
-# 2. PENGESANAN AKAUN B2 DINAMIK
+# 2. PENGESANAN AKAUN B2 DINAMIK (MENYOKONG 200 AKAUN)
 # ------------------------------------------------------------------------------
 def load_dynamic_b2_accounts() -> List[Dict[str, Any]]:
-    """Membaca senarai 50 akaun B2 daripada B2_ACCOUNTS_JSON atau konfigurasi."""
-    raw_json = os.environ.get("B2_ACCOUNTS_JSON", "").strip() or os.environ.get("B2_MULTI_ACCOUNT_JSON", "").strip()
-    if raw_json:
-        try:
-            parsed = json.loads(raw_json)
-            if isinstance(parsed, list) and parsed:
-                parsed.sort(key=lambda x: x.get("index", 0))
-                return parsed
-        except Exception:
-            pass
+    """Membaca sehingga 200 akaun B2 daripada B2_ACCOUNTS_JSON & B2_ACCOUNTS_JSON_X1 atau konfigurasi tempatan."""
+    raw_sources = [
+        os.environ.get("B2_ACCOUNTS_JSON", "").strip(),
+        os.environ.get("B2_ACCOUNTS_JSON_X1", "").strip(),
+        os.environ.get("B2_MULTI_ACCOUNT_JSON", "").strip()
+    ]
 
+    combined_accounts = []
+    for raw_json in raw_sources:
+        if raw_json:
+            try:
+                parsed = json.loads(raw_json)
+                if isinstance(parsed, list):
+                    combined_accounts.extend(parsed)
+            except Exception:
+                pass
+
+    if combined_accounts:
+        combined_accounts.sort(key=lambda x: int(x.get("index", 0)))
+        return combined_accounts
+
+    # Sandaran jika dijalankan secara lokal (.env.local)
     if hasattr(_config, "get_b2_accounts"):
         cfg_accs = _config.get_b2_accounts()
         if cfg_accs:
@@ -321,10 +332,10 @@ def run_b2_overage_guard(max_cap_gb: float = 10.0, max_delete_per_acc: int = 2) 
         f"Had Pemadaman        : [bold magenta]Maksimum {max_delete_per_acc} Fail[/bold magenta] per akaun melebihi had"
     )
     console.print(Panel.fit(header_msg, border_style="cyan"))
-    console.print("[dim]🔍 Mengimbas kapasiti dan senarai fail bagi 50 akaun B2 secara selari...[/dim]")
+    console.print(f"[dim]🔍 Mengimbas kapasiti dan senarai fail bagi {len(accounts)} akaun B2 secara selari...[/dim]")
 
     inspected_accounts: List[Dict[str, Any]] = []
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    with ThreadPoolExecutor(max_workers=15) as executor:
         future_map = {executor.submit(inspect_account_files_detailed, acc, 30.0): acc for acc in accounts}
         for fut in as_completed(future_map):
             inspected_accounts.append(fut.result())
@@ -434,7 +445,7 @@ def run_b2_overage_guard(max_cap_gb: float = 10.0, max_delete_per_acc: int = 2) 
         console.print(Panel(msg, border_style="green"))
     else:
         msg = (
-            f"[bold green]✅ SEMUA 50 AKAUN B2 DIBAWAH HAD SILING 10.0 GB![/bold green]\n"
+            f"[bold green]✅ SEMUA {len(accounts)} AKAUN B2 DIBAWAH HAD SILING {max_cap_gb:.1f} GB![/bold green]\n"
             f"Tiada sebarang akaun yang berisiko dikenakan caj mikro overage. Tiada fail dipadam."
         )
         console.print(Panel(msg, border_style="green"))

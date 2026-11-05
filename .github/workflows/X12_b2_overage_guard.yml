@@ -50,6 +50,7 @@ jobs:
         env:
           REDIS_ACCOUNTS_JSON: ${{ secrets.REDIS_ACCOUNTS_JSON }}
           B2_ACCOUNTS_JSON: ${{ secrets.B2_ACCOUNTS_JSON }}
+          B2_ACCOUNTS_JSON_X1: ${{ secrets.B2_ACCOUNTS_JSON_X1 }}
         run: |
           MAX_CAP="${{ inputs.max_cap_gb || '10.0' }}"
           MAX_DEL="${{ inputs.max_delete || '2' }}"

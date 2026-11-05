@@ -177,9 +177,9 @@ class SeriesB2StorageManager:
         if chosen_acc:
             return chosen_acc
 
-        console.print("[bold yellow]⚠️ Semua 50 akaun B2 penuh! Memulakan pembersihan fail lama (LRU)...[/bold yellow]")
+        console.print(f"[bold yellow]⚠️ Semua {len(self.accounts)} akaun B2 penuh! Memulakan pembersihan fail lama (LRU)...[/bold yellow]")
 
-        for _ in range(15):
+        for _ in range(30):
             oldest_meta = redis_db_instance.get_oldest_stream_across_shards()
             if not oldest_meta:
                 console.print("[bold red]❌ Tiada fail lama untuk dilupuskan![/bold red]")

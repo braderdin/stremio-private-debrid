@@ -117,45 +117,55 @@ else:
     UPSTASH_REDIS_REST_TOKEN = os.getenv("UPSTASH_REDIS_REST_TOKEN", "")
 
 
-# 7. Pengekstrakan 20 Akaun Backblaze B2 (Multi-Bucket Storage)
+# 7. Pengekstrakan 200 Akaun Backblaze B2 (Multi-Bucket Storage)
 def get_b2_accounts() -> list:
     """
     Mengekstrak akaun B2:
-    Keutamaan 1: Membaca format JSON dari GitHub Secret (B2_ACCOUNTS_JSON).
-    Keutamaan 2: Membaca dari .env.local (B2_ACC001_KEY_ID hingga B2_ACC020_KEY_ID).
+    Keutamaan 1: Membaca format JSON dari GitHub Secrets (B2_ACCOUNTS_JSON & B2_ACCOUNTS_JSON_X1).
+    Keutamaan 2: Membaca dari .env.local (B2_ACC001_KEY_ID hingga B2_ACC200_KEY_ID).
     """
     accounts = []
 
-    # Keutamaan 1: GitHub Action Secret
-    b2_json_raw = os.getenv("B2_ACCOUNTS_JSON", "").strip() or os.getenv("B2_MULTI_ACCOUNT_JSON", "").strip()
-    if b2_json_raw:
-        try:
-            parsed = json.loads(b2_json_raw)
-            if isinstance(parsed, list) and len(parsed) > 0:
-                for idx, item in enumerate(parsed, 1):
-                    if isinstance(item, dict):
-                        key_id = str(item.get("key_id", "")).strip()
-                        app_key = str(item.get("app_key", "")).strip()
-                        bucket_name = str(item.get("bucket_name", "")).strip()
+    # Keutamaan 1: GitHub Action Secrets (Menyokong pembahagian 2 kunci <= 48 KB)
+    raw_sources = [
+        os.getenv("B2_ACCOUNTS_JSON", "").strip(),
+        os.getenv("B2_ACCOUNTS_JSON_X1", "").strip(),
+        os.getenv("B2_MULTI_ACCOUNT_JSON", "").strip()
+    ]
 
-                        if key_id and app_key and bucket_name:
-                            accounts.append({
-                                "index": int(item.get("index", idx)),
-                                "key_id": key_id,
-                                "app_key": app_key,
-                                "bucket_name": bucket_name,
-                                "bucket_id": str(item.get("bucket_id", "")).strip(),
-                                "key_name": str(item.get("key_name", f"key-{idx:03d}")).strip(),
-                                "endpoint": str(item.get("endpoint", "s3.us-west-004.backblazeb2.com")).strip()
-                            })
-                if accounts:
-                    accounts.sort(key=lambda x: x["index"])
-                    return accounts
-        except Exception as e:
-            print(f"⚠️ Ralat membaca B2_ACCOUNTS_JSON: {e}. Beralih ke .env.local...")
+    parsed_items = []
+    for raw_json in raw_sources:
+        if raw_json:
+            try:
+                parsed = json.loads(raw_json)
+                if isinstance(parsed, list):
+                    parsed_items.extend(parsed)
+            except Exception as e:
+                print(f"⚠️ Ralat membaca JSON B2: {e}")
 
-    # Keutamaan 2: Imbas format .env.local (ACC001 hingga ACC050)
-    for idx in range(1, 51):
+    if parsed_items:
+        for idx, item in enumerate(parsed_items, 1):
+            if isinstance(item, dict):
+                key_id = str(item.get("key_id", "")).strip()
+                app_key = str(item.get("app_key", "")).strip()
+                bucket_name = str(item.get("bucket_name", "")).strip()
+
+                if key_id and app_key and bucket_name:
+                    accounts.append({
+                        "index": int(item.get("index", idx)),
+                        "key_id": key_id,
+                        "app_key": app_key,
+                        "bucket_name": bucket_name,
+                        "bucket_id": str(item.get("bucket_id", "")).strip(),
+                        "key_name": str(item.get("key_name", f"key-{idx:03d}")).strip(),
+                        "endpoint": str(item.get("endpoint", "s3.us-west-004.backblazeb2.com")).strip()
+                    })
+        if accounts:
+            accounts.sort(key=lambda x: x["index"])
+            return accounts
+
+    # Keutamaan 2: Imbas format .env.local (ACC001 hingga ACC200)
+    for idx in range(1, 201):
         formats = [f"{idx:03d}", f"{idx:02d}", f"{idx}"]
         matched = False
 
@@ -170,7 +180,7 @@ def get_b2_accounts() -> list:
 
             if key_id and app_key and bucket_name:
                 accounts.append({
-                    "index": len(accounts) + 1,
+                    "index": idx,
                     "key_id": key_id.strip(),
                     "app_key": app_key.strip(),
                     "bucket_name": bucket_name.strip(),
@@ -180,9 +190,6 @@ def get_b2_accounts() -> list:
                 })
                 matched = True
                 break
-
-        if not matched and len(accounts) >= 20:
-            break
 
     return accounts
 

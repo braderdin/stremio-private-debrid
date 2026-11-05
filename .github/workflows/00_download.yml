@@ -68,6 +68,7 @@ jobs:
         env:
           REDIS_ACCOUNTS_JSON: ${{ secrets.REDIS_ACCOUNTS_JSON }}
           B2_ACCOUNTS_JSON: ${{ secrets.B2_ACCOUNTS_JSON }}
+          B2_ACCOUNTS_JSON_X1: ${{ secrets.B2_ACCOUNTS_JSON_X1 }}
         run: |
           python live_engine_v3/X07_b2_storage_guard.py \
             --min-free-gb 5.0 \
@@ -77,6 +78,7 @@ jobs:
         env:
           REDIS_ACCOUNTS_JSON: ${{ secrets.REDIS_ACCOUNTS_JSON }}
           B2_ACCOUNTS_JSON: ${{ secrets.B2_ACCOUNTS_JSON }}
+          B2_ACCOUNTS_JSON_X1: ${{ secrets.B2_ACCOUNTS_JSON_X1 }}
         run: |
           python live_engine_v3/X08_b2_smart_storage_guard.py \
             --min-free-gb 5.0 \
@@ -87,6 +89,7 @@ jobs:
         env:
           REDIS_ACCOUNTS_JSON: ${{ secrets.REDIS_ACCOUNTS_JSON }}
           B2_ACCOUNTS_JSON: ${{ secrets.B2_ACCOUNTS_JSON }}
+          B2_ACCOUNTS_JSON_X1: ${{ secrets.B2_ACCOUNTS_JSON_X1 }}
           CF_WORKER_B2_PROXY_STORAGE: "https://b2-proxy-aria-engine.retrogamerg405v.workers.dev"
         run: |
           python live_engine/03_runner_core.py \
