@@ -6,11 +6,12 @@
 #
 # KELEBIHAN & CIRI PINTAR (X08):
 # 1. Zero False-Positive: Menghapuskan ralat 0.0 GB akibat timeout atau sambungan terputus.
-# 2. Double-Check Fallback: Akaun yang gagal pada pusingan pertama akan disemak semula
-#    secara automatik dengan tempoh masa tamat (timeout) yang lebih panjang.
-# 3. Pengesahan Integriti Keras (Hard Validation): Akaun yang gagal tidak akan sekali-kali
+# 2. Menyokong Penuh 200 Akaun B2 (B2_ACCOUNTS_JSON & B2_ACCOUNTS_JSON_X1).
+# 3. Double-Check Fallback: Akaun yang gagal pada pusingan pertama disemak semula
+#    secara automatik dengan tempoh masa tamat (timeout) yang lebih panjang (40s).
+# 4. Pengesahan Integriti Keras (Hard Validation): Akaun yang gagal tidak akan sekali-kali
 #    dilabelkan sebagai "SIAP SEDIA" atau dipilih untuk muat naik.
-# 4. Pelupusan Berperingkat Global LRU: Mengosongkan fail tertua sehingga baki ruang
+# 5. Pelupusan Berperingkat Global LRU: Mengosongkan fail tertua sehingga baki ruang
 #    sebenar mencukupi (>= 5.0 GB) sebelum muat turun dimulakan.
 # ==============================================================================
 
@@ -56,27 +57,36 @@ except Exception as e:
 
 
 # ------------------------------------------------------------------------------
-# 2. PENGESANAN AKAUN B2 DINAMIK (SEHINGGA 50 AKAUN)
+# 2. PENGESANAN AKAUN B2 DINAMIK (MENYOKONG 200 AKAUN)
 # ------------------------------------------------------------------------------
 def load_dynamic_b2_accounts() -> List[Dict[str, Any]]:
     """
-    Mengesan 50 akaun B2 secara dinamik daripada:
-    1. GitHub Actions Secret (B2_ACCOUNTS_JSON)
-    2. Fail persekitaran tempatan (.env.local)
-    3. Konfigurasi lalai 00_config.py
+    Mengesan 200 akaun B2 secara dinamik daripada:
+    1. GitHub Actions Secrets (B2_ACCOUNTS_JSON & B2_ACCOUNTS_JSON_X1)
+    2. Modul 00_config.py (.env.local tempatan)
+    3. Konfigurasi lalai storage.accounts / _config.B2_ACCOUNTS
     """
-    raw_json = os.environ.get("B2_ACCOUNTS_JSON", "").strip() or os.environ.get("B2_MULTI_ACCOUNT_JSON", "").strip()
+    raw_sources = [
+        os.environ.get("B2_ACCOUNTS_JSON", "").strip(),
+        os.environ.get("B2_ACCOUNTS_JSON_X1", "").strip(),
+        os.environ.get("B2_MULTI_ACCOUNT_JSON", "").strip()
+    ]
 
-    if raw_json:
-        try:
-            parsed = json.loads(raw_json)
-            if isinstance(parsed, list) and parsed:
-                parsed.sort(key=lambda x: x.get("index", 0))
-                return parsed
-        except Exception:
-            pass
+    combined = []
+    for raw in raw_sources:
+        if raw:
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, list):
+                    combined.extend(parsed)
+            except Exception:
+                pass
 
-    # Cuba baca daripada fungsi 00_config jika ada
+    if combined:
+        combined.sort(key=lambda x: int(x.get("index", 0)))
+        return combined
+
+    # Sandaran jika dijalankan secara lokal melalui 00_config (.env.local)
     if hasattr(_config, "get_b2_accounts"):
         cfg_accs = _config.get_b2_accounts()
         if cfg_accs:
@@ -205,8 +215,8 @@ def scan_all_accounts_smart(accounts: List[Dict[str, Any]]) -> List[Dict[str, An
     """
     results: Dict[int, Dict[str, Any]] = {}
 
-    # FASA 1: IMBASAN SELARI
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    # FASA 1: IMBASAN SELARI (Ditingkatkan ke 15 pekerja)
+    with ThreadPoolExecutor(max_workers=15) as executor:
         future_to_acc = {executor.submit(inspect_single_account_robust, acc, 25.0): acc for acc in accounts}
         for future in as_completed(future_to_acc):
             res = future.result()
@@ -277,7 +287,7 @@ def run_smart_storage_guard(
 
     accounts = load_dynamic_b2_accounts()
     if not accounts:
-        console.print("[bold red]❌ Tiada akaun B2 dikesan dalam persekitaran (B2_ACCOUNTS_JSON kosong)![/bold red]")
+        console.print("[bold red]❌ Tiada akaun B2 dikesan dalam persekitaran![/bold red]")
         return False
 
     storage.accounts = accounts
@@ -291,7 +301,7 @@ def run_smart_storage_guard(
         border_style="cyan"
     ))
 
-    console.print("[dim]🔍 Menjalankan imbasan kesihatan & kapasiti 50 akaun B2...[/dim]")
+    console.print(f"[dim]🔍 Menjalankan imbasan kesihatan & kapasiti {total_acc} akaun B2...[/dim]")
     usage_list = scan_all_accounts_smart(accounts)
 
     def find_verified_ready_account(u_list):
@@ -387,7 +397,7 @@ def run_smart_storage_guard(
         return True
     else:
         console.print(Panel(
-            f"[bold red]❌ PENGESAHAN GAGAL: TIADA RUANG BEBAS DISAHKAN MENCUKUPI PADA 50 AKAUN B2![/bold red]\n"
+            f"[bold red]❌ PENGESAHAN GAGAL: TIADA RUANG BEBAS DISAHKAN MENCUKUPI PADA {total_acc} AKAUN B2![/bold red]\n"
             f"Semua akaun mungkin penuh atau mengalami ralat sambungan berpanjangan.",
             border_style="red"
         ))

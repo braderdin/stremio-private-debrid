@@ -4,14 +4,15 @@
 # LOKASI: /home/braderdin/stremio-private-debrid/live_engine_v3/X07_b2_storage_guard.py
 #
 # CIRI-CIRI UTAMA:
-# 1. Pengesanan Dinamik 20 / 30 / 50 Akaun B2 secara pintar (Zero Hardcoding).
-# 2. Imbasan Selari (Multi-Threaded) penggunaan baldi B2 dalam masa beberapa saat.
-# 3. Penjagaan Integriti Data (Zero Orphan):
+# 1. Pengesanan Dinamik sehingga 200 Akaun B2 secara pintar (Zero Hardcoding).
+# 2. Menyokong pecahan rahsia GitHub: B2_ACCOUNTS_JSON & B2_ACCOUNTS_JSON_X1.
+# 3. Imbasan Selari (Multi-Threaded) penggunaan baldi B2 dalam masa beberapa saat.
+# 4. Penjagaan Integriti Data (Zero Orphan):
 #    - Padam fail fizikal di B2 dahulu.
 #    - Padam metadata di Redis Shard hanya selepas B2 mengesahkan fail telah tiada.
-# 4. Pelupusan Berperingkat Global LRU sehingga baki ruang selamat (9.0 GB had)
+# 5. Pelupusan Berperingkat Global LRU sehingga baki ruang selamat (9.0 GB had)
 #    mempunyai ruang penimbal sekurang-kurangnya 3.5 GB - 9.0 GB untuk fail baharu.
-# 5. Jeda Masa Bertenang (Cooling-off) untuk membenarkan B2 API mengira semula Cap.
+# 6. Jeda Masa Bertenang (Cooling-off) untuk membenarkan B2 API mengira semula Cap.
 # ==============================================================================
 
 import os
@@ -55,42 +56,41 @@ except Exception as e:
 
 
 # ------------------------------------------------------------------------------
-# 2. PENGESANAN AKAUN B2 DINAMIK (20 / 30 / 50 AKAUN)
+# 2. PENGESANAN AKAUN B2 DINAMIK (MENYOKONG 200 AKAUN)
 # ------------------------------------------------------------------------------
 def load_dynamic_b2_accounts() -> List[Dict[str, Any]]:
     """
     Mengesan akaun B2 secara dinamik daripada:
-    1. Pemboleh ubah persekitaran B2_ACCOUNTS_JSON (GitHub Actions)
-    2. Fail rahsia .env.local (Persekitaran WSL Ubuntu tempatan)
-    3. Konfigurasi lalai storage.accounts
+    1. Pemboleh ubah persekitaran B2_ACCOUNTS_JSON & B2_ACCOUNTS_JSON_X1 (GitHub Actions)
+    2. Fail rahsia .env.local melalui 00_config.py (Persekitaran WSL Ubuntu tempatan)
+    3. Konfigurasi lalai storage.accounts / _config.B2_ACCOUNTS
     """
-    raw_json = os.environ.get("B2_ACCOUNTS_JSON", "").strip()
+    raw_sources = [
+        os.environ.get("B2_ACCOUNTS_JSON", "").strip(),
+        os.environ.get("B2_ACCOUNTS_JSON_X1", "").strip(),
+        os.environ.get("B2_MULTI_ACCOUNT_JSON", "").strip(),
+    ]
 
-    # 1. Cuba baca dari persekitaran terus
-    if raw_json:
-        try:
-            parsed = json.loads(raw_json)
-            if isinstance(parsed, list) and parsed:
-                return parsed
-        except Exception:
-            pass
+    combined = []
+    for raw in raw_sources:
+        if raw:
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, list):
+                    combined.extend(parsed)
+            except Exception:
+                pass
 
-    # 2. Cuba baca dari .env.local jika wujud
-    env_local_path = PROJECT_ROOT / ".env.local"
-    if env_local_path.exists():
-        try:
-            with open(env_local_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line.startswith("B2_ACCOUNTS_JSON="):
-                        val = line.split("=", 1)[1].strip().strip('"').strip("'")
-                        parsed = json.loads(val)
-                        if isinstance(parsed, list) and parsed:
-                            return parsed
-        except Exception:
-            pass
+    if combined:
+        combined.sort(key=lambda x: int(x.get("index", 0)))
+        return combined
 
-    # 3. Sandaran kepada tetapan asal
+    # Sandaran jika dijalankan secara tempatan melalui 00_config (.env.local)
+    if hasattr(_config, "get_b2_accounts"):
+        cfg_accs = _config.get_b2_accounts()
+        if cfg_accs:
+            return cfg_accs
+
     return getattr(storage, "accounts", []) or getattr(_config, "B2_ACCOUNTS", [])
 
 
@@ -126,7 +126,7 @@ def inspect_single_account(acc: Dict[str, Any]) -> Dict[str, Any]:
 def scan_all_accounts_parallel(accounts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Mengimbas keseluruhan akaun secara selari bagi mengurangkan masa menunggu."""
     results = []
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    with ThreadPoolExecutor(max_workers=15) as executor:
         futures = {executor.submit(inspect_single_account, acc): acc["index"] for acc in accounts}
         for future in as_completed(futures):
             res = future.result()
@@ -199,14 +199,14 @@ def run_storage_guard(
 
     console.print(Panel.fit(
         f"[bold cyan]🛡️  STREMIO V3: B2 STORAGE PRE-FLIGHT GUARD (X07)[/bold cyan]\n"
-        f"Jumlah Akaun Dikesan: [bold green]{total_acc} Akaun B2[/bold green]\n"
-        f"Had Siling Selamat   : [bold yellow]{safe_cap_gb:.1f} GB[/bold yellow] per akaun\n"
-        f"Ruang Bebas Diperlukan: [bold magenta]>= {required_free_gb:.1f} GB[/bold magenta] untuk fail baharu",
+        f"Jumlah Akaun Dikesan  : [bold green]{total_acc} Akaun B2[/bold green]\n"
+        f"Had Siling Selamat     : [bold yellow]{safe_cap_gb:.1f} GB[/bold yellow] per akaun\n"
+        f"Ruang Bebas Diperlukan : [bold magenta]>= {required_free_gb:.1f} GB[/bold magenta] untuk fail baharu",
         border_style="cyan"
     ))
 
     # 2. Imbas status semasa kesemua akaun
-    console.print("[dim]🔍 Mengimbas status kapasiti semua akaun B2 secara selari...[/dim]")
+    console.print(f"[dim]🔍 Mengimbas status kapasiti kesemua {total_acc} akaun B2 secara selari...[/dim]")
     usage_list = scan_all_accounts_parallel(accounts)
 
     # Semak sama ada sudah wujud akaun yang mempunyai baki mencukupi
